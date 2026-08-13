@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.venv/
+venv/
+*.log
+.pi-self-improvement/
+private/
+*.local.json
+build/
+dist/
+*.egg-info/
