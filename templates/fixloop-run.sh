@@ -55,6 +55,18 @@ if [ -z "$LATEST_PACKET" ]; then
   exit 0
 fi
 
+# The miner produces a packet twice a week and this runs daily, so without a
+# marker the same packet is triaged five extra times, appending an identical
+# entry to every decision file each time.
+MARKER_DIR="$PSI_OUTPUT_ROOT/queue"
+MARKER="$MARKER_DIR/.last-triaged"
+PACKET_NAME="$(basename "$LATEST_PACKET")"
+if [ -f "$MARKER" ] && [ "$(cat "$MARKER" 2>/dev/null)" = "$PACKET_NAME" ]; then
+  STATUS="skipped"
+  DETAIL="reason=already-triaged packet=$PACKET_NAME"
+  exit 0
+fi
+
 TRIAGE_OUT="$(mktemp -t fixloop-triage)"
 cleanup() {
   rm -f "$TRIAGE_OUT"
@@ -108,10 +120,13 @@ fi
 # The model produced triage text; only this deterministic writer touches disk.
 if "$PSI_BIN" --write-queue "$TRIAGE_OUT" --output-root "$PSI_OUTPUT_ROOT" >/dev/null 2>&1; then
   STATUS="ok"
-  DETAIL="packet=$(basename "$LATEST_PACKET")"
+  DETAIL="packet=$PACKET_NAME"
+  mkdir -p "$MARKER_DIR" 2>/dev/null || true
+  printf '%s\n' "$PACKET_NAME" >"$MARKER" 2>/dev/null || true
 else
+  # Deliberately not marked: a failed write should be retried tomorrow.
   STATUS="write-failed"
-  DETAIL="packet=$(basename "$LATEST_PACKET")"
+  DETAIL="packet=$PACKET_NAME"
 fi
 
 exit 0

@@ -101,7 +101,11 @@ def _run_write_queue(args, out, err) -> int:
         root = _output_root(args)
         resolved = state.Resolutions.load(root / state.RESOLUTIONS_FILE)
         result = writer.write_triage(
-            root, triage, machine=args.machine, resolved_keys=set(resolved.entries)
+            root,
+            triage,
+            machine=args.machine,
+            resolved_keys=set(resolved.entries),
+            known_keys=writer.staged_keys(root),
         )
     except (writer.TriageError, writer.OutputRootEscape) as error:
         print(f"error: {error}", file=err)

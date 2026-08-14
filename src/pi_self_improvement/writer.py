@@ -21,6 +21,7 @@ from pathlib import Path
 
 from .redact import Redactor
 from .safeio import OutputRootEscape, read_json, resolve_within, write_json, write_text
+from .stage import RUNS_DIR
 from .state import SCHEMA_VERSION
 
 QUEUE_DIR = "queue"
@@ -168,6 +169,27 @@ def _load_json(text: str) -> dict:
         raise TriageError(f"triage is not valid JSON: {error}") from error
 
 
+def staged_keys(output_root) -> set:
+    """Every `route:target` this installation has actually staged.
+
+    Used to reject triage entries that name something never observed. The packet
+    the model reads is built from transcript excerpts, so its content is not
+    trusted input: text in a session can ask for an entry, and without this the
+    writer would file it against evidence that does not exist.
+    """
+    directory = Path(output_root) / RUNS_DIR
+    if not directory.is_dir():
+        return set()
+    keys = set()
+    for path in directory.glob("*.json"):
+        payload = read_json(path)
+        for proposal in (payload or {}).get("proposals", []):
+            key = proposal.get("key")
+            if key:
+                keys.add(key)
+    return keys
+
+
 def write_triage(
     output_root,
     triage: Triage,
@@ -175,6 +197,7 @@ def write_triage(
     machine: str | None = None,
     at: str | None = None,
     resolved_keys=(),
+    known_keys=None,
 ) -> WriteResult:
     """Record decisions, then re-render the queue from them (AC-052).
 
@@ -185,6 +208,14 @@ def write_triage(
     """
     root = Path(output_root)
     moment = at or datetime.now(timezone.utc).isoformat()
+
+    if known_keys is not None:
+        unknown = sorted({e.key for e in triage.entries} - set(known_keys))
+        if unknown:
+            raise TriageError(
+                "triage names target(s) that were never staged: "
+                + ", ".join(repr(key) for key in unknown[:5])
+            )
 
     decision_paths = []
     for entry in triage.entries:
@@ -306,6 +337,7 @@ def render_queue(queued, notes: str, moment: str) -> str:
 
 
 __all__ = [
+    "staged_keys",
     "DROP",
     "ACT",
     "INVESTIGATE",

@@ -216,3 +216,39 @@ class TestWriterHandoff(RunnerTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPacketIsNotReprocessed(RunnerTestCase):
+    """The miner produces a packet twice a week; this runs daily."""
+
+    def test_the_same_packet_is_triaged_once(self):
+        self.with_packet()
+
+        self.run_runner()
+        self.run_runner()
+
+        log = self.log_text()
+        self.assertEqual(log.count("status=ok"), 1)
+        self.assertIn("status=skipped", log)
+
+    def test_a_new_packet_is_triaged_again(self):
+        self.with_packet()
+        self.run_runner()
+
+        (self.output_root / "review-packets" / "20260202T000000Z.md").write_text(
+            "# Review packet\n", encoding="utf-8"
+        )
+        self.run_runner()
+
+        self.assertEqual(self.log_text().count("status=ok"), 2)
+
+    def test_a_failed_write_is_retried_next_time(self):
+        """Marking on failure would strand the packet permanently."""
+        self.with_packet()
+        self._install("pi-self-improvement", "#!/bin/bash\nexit 1\n")
+        self.run_runner()
+
+        self._install("pi-self-improvement", FAKE_PSI)
+        self.run_runner()
+
+        self.assertIn("status=ok", self.log_text())

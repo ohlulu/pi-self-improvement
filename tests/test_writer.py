@@ -320,7 +320,20 @@ class TestCliIntegration(WriterTestCase):
         path.write_text(json.dumps(payload), encoding="utf-8")
         return path
 
+    def stage_run(self, *keys):
+        """Triage always follows a scan in the real flow, and the writer now
+        refuses targets that were never staged."""
+        from pi_self_improvement import stage
+
+        path = self.root / stage.RUNS_DIR / "R1.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"proposals": [{"id": f"p{i}", "key": k} for i, k in enumerate(keys)]}),
+            encoding="utf-8",
+        )
+
     def test_write_queue_writes_the_queue_and_decisions(self):
+        self.stage_run("tool:demo-cli")
         path = self.triage_file(triage_payload(entry()))
 
         stdout, _ = self.run_cli(
@@ -351,6 +364,7 @@ class TestCliIntegration(WriterTestCase):
 
     def test_write_queue_does_not_scan(self):
         """It must not need a sessions directory to exist."""
+        self.stage_run("tool:demo-cli")
         path = self.triage_file(triage_payload(entry()))
 
         stdout, _ = self.run_cli("--write-queue", str(path), "--output-root", str(self.root))
@@ -360,3 +374,64 @@ class TestCliIntegration(WriterTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTriageMustNameStagedTargets(WriterTestCase):
+    """The packet is built from transcript excerpts, so the model's input is not
+    trusted: text in a session could ask for a queue entry that has no evidence."""
+
+    def stage_run(self, *keys):
+        from pi_self_improvement import stage
+        from pi_self_improvement.model import ParseCounts
+
+        payload = {
+            "schema_version": 1,
+            "run_id": "R1",
+            "proposals": [{"id": f"p{i}", "key": k} for i, k in enumerate(keys)],
+        }
+        path = self.root / stage.RUNS_DIR / "R1.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_a_fabricated_target_is_refused(self):
+        self.stage_run("tool:real")
+
+        with self.assertRaises(writer.TriageError) as caught:
+            writer.write_triage(
+                self.root,
+                writer.parse_triage(triage_payload(entry("tool:invented"))),
+                known_keys=writer.staged_keys(self.root),
+            )
+
+        self.assertIn("tool:invented", str(caught.exception))
+
+    def test_a_staged_target_is_accepted(self):
+        self.stage_run("tool:real")
+
+        writer.write_triage(
+            self.root,
+            writer.parse_triage(triage_payload(entry("tool:real"))),
+            known_keys=writer.staged_keys(self.root),
+        )
+
+        self.assertIn("tool:real", self.queue_text())
+
+    def test_nothing_is_written_when_the_triage_is_refused(self):
+        self.stage_run("tool:real")
+
+        with self.assertRaises(writer.TriageError):
+            writer.write_triage(
+                self.root,
+                writer.parse_triage(triage_payload(entry("tool:invented"))),
+                known_keys=writer.staged_keys(self.root),
+            )
+
+        self.assertFalse((self.root / writer.DECISIONS_DIR).exists())
+
+    def test_staged_keys_reads_every_run(self):
+        self.stage_run("tool:a", "tool:b")
+
+        self.assertEqual(writer.staged_keys(self.root), {"tool:a", "tool:b"})
+
+    def test_staged_keys_is_empty_before_any_scan(self):
+        self.assertEqual(writer.staged_keys(self.root), set())
