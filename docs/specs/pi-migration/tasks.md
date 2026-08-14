@@ -9,8 +9,8 @@ read_when:
 
 ## Phase 1: Foundation
 
-- [ ] T001 [REQ-001] Scaffold package: `pyproject.toml` (entry point `pi-self-improvement`, Python >= 3.10), `src/pi_self_improvement/__init__.py`, GitHub Actions CI running unittest on 3.10/3.12. Verify: `python3 -m unittest discover -s tests` → runs (0 tests OK)
-- [ ] T002 [REQ-003] Create `src/pi_self_improvement/model.py` with `Evidence`, `ToolCall`, `SessionSummary` dataclasses and `has_signal()`. Verify: `python3 -c "from pi_self_improvement.model import SessionSummary"` → no error
+- [x] T001 [REQ-001] Scaffold package: `pyproject.toml` (entry point `pi-self-improvement`, Python >= 3.10), `src/pi_self_improvement/__init__.py`, GitHub Actions CI running unittest on 3.10/3.12. Verify: `python3 -m unittest discover -s tests` → runs (0 tests OK)
+- [x] T002 [REQ-003] Create `src/pi_self_improvement/model.py` with `Evidence`, `ToolCall`, `SessionSummary` dataclasses and `has_signal()`. Verify: `python3 -c "from pi_self_improvement.model import SessionSummary"` → no error
 - [ ] T003 [REQ-002,REQ-003] Build synthetic pi transcript fixtures in `tests/fixtures/` covering: normal session, isError result, timeout output, empty-result call, SKILL.md read, `context:skill_loaded` custom entry, zh/en corrections, box-draw separator and `Task:` scaffold, `custom_message` injection, `bashExecution` with non-zero exit, `aborted`/`error` stopReason, dangling toolCall, branched session (sibling `parentId`), nested subagent transcript path, and a non-canonical schema file. No real transcript content. Verify: `python3 -m json.tool` on each fixture line → valid
 
 ## Phase 2: Parse (REQ-002, REQ-005 slice)
