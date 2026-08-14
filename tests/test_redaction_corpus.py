@@ -23,6 +23,8 @@ from pathlib import Path
 from pi_self_improvement import redact
 from pi_self_improvement.model import DEFAULT_EXCERPT_LIMIT
 
+from . import support
+
 #: Every value here is invented. If one of these strings ever appears in an
 #: output file, redaction has a hole.
 CANARIES = {
@@ -307,6 +309,127 @@ class TestCanaryScan(unittest.TestCase):
 
     def test_scan_of_a_missing_root_is_empty(self):
         self.assertEqual(redact.scan_for_canaries(self.root / "nope", ["x"]), [])
+
+
+class TestWrittenOutputRoot(unittest.TestCase):
+    """AC-042 and AC-006 over a real scan — the halves deferred from T007/T018.
+
+    Every other test in this file checks a function's return value. This one
+    checks the artefact: it runs the CLI over transcripts stuffed with canaries
+    and then greps the output root, without caring which module wrote what or
+    whether that module remembered the boundary.
+    """
+
+    def setUp(self):
+        import io
+        import shutil
+
+        from pi_self_improvement import cli
+
+        self._cli = cli
+        self._io = io
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.output_root = self.home / ".pi-self-improvement"
+        sessions = self.home / ".pi" / "agent" / "sessions"
+        sessions.mkdir(parents=True)
+        self._shutil = shutil
+        self._seed(sessions)
+        self.addCleanup(self._tmp.cleanup)
+
+    def _seed(self, sessions: Path) -> None:
+        """Two sessions whose commands and outputs are made of canaries."""
+        for index, (name, value) in enumerate(sorted(CANARIES.items())):
+            slug = f"--tmp-canary-{index % 2}--"
+            path = sessions / slug / f"2026-02-0{1 + index % 8}T10-00-00-000Z_canary-{index}.jsonl"
+            support.write_jsonl(
+                path,
+                [
+                    support.session_record(f"canary-{index}", cwd="/tmp/canary-repo"),
+                    support.user_record(f"這樣不對，應該用 {value}"),
+                    support.tool_call_record(
+                        f"c{index}", "bash", {"command": f"demoext-cli send --token {value}"}
+                    ),
+                    support.tool_result_record(
+                        f"c{index}", "bash", f"failed: rejected {value}", is_error=True
+                    ),
+                    support.tool_call_record(
+                        f"x{index}", "demoext_search", {"query": value}
+                    ),
+                    support.tool_result_record(
+                        f"x{index}", "demoext_search", f"error: {value} not found", is_error=True
+                    ),
+                ],
+            )
+
+    def scan(self, *argv):
+        out, err = self._io.StringIO(), self._io.StringIO()
+        code = self._cli.main(
+            ["--home", str(self.home), "--all", *argv], stdout=out, stderr=err
+        )
+        self.assertEqual(code, 0, msg=err.getvalue())
+        return out.getvalue()
+
+    def written_files(self):
+        return [path for path in self.output_root.rglob("*") if path.is_file()]
+
+    def test_no_canary_survives_anywhere_under_the_output_root(self):
+        self.scan()
+
+        self.assertTrue(self.written_files(), "the scan wrote nothing to check")
+        hits = redact.scan_for_canaries(self.output_root, CANARIES.values())
+
+        self.assertEqual(
+            hits, [], f"secret canaries reached disk: {[hit.canary for hit in hits]}"
+        )
+
+    def test_the_scan_really_did_stage_evidence_from_those_transcripts(self):
+        """Guards the test above: a scan that staged nothing would pass it."""
+        self.scan()
+
+        proposals = list((self.output_root / "proposals").rglob("*.json"))
+        evidence = [
+            item
+            for path in proposals
+            for item in json.loads(path.read_text(encoding="utf-8"))["evidence"]
+        ]
+
+        self.assertTrue(proposals)
+        self.assertTrue(evidence)
+
+    def test_full_marks_local_only_in_all_three_outputs(self):
+        """AC-006 through the CLI."""
+        self.scan("--full")
+
+        run = json.loads(
+            next((self.output_root / "runs").glob("*.json")).read_text(encoding="utf-8")
+        )
+        proposal = json.loads(
+            next((self.output_root / "proposals").rglob("*.json")).read_text(encoding="utf-8")
+        )
+        packet = next((self.output_root / "review-packets").glob("*.md")).read_text("utf-8")
+
+        self.assertTrue(run["local_only"])
+        self.assertTrue(proposal["local_only"])
+        self.assertIn("LOCAL ONLY", packet)
+
+    def test_full_is_the_only_way_a_canary_reaches_disk(self):
+        """--full is documented as bypassing the boundary. If this ever stops
+        finding canaries, --full silently stopped doing what it claims."""
+        self.scan("--full")
+
+        hits = redact.scan_for_canaries(self.output_root, CANARIES.values())
+
+        self.assertTrue(hits, "--full should preserve the raw text it warns about")
+
+    def test_a_default_run_is_not_marked_local_only(self):
+        self.scan()
+
+        run = json.loads(
+            next((self.output_root / "runs").glob("*.json")).read_text(encoding="utf-8")
+        )
+
+        self.assertFalse(run["local_only"])
 
 
 if __name__ == "__main__":
