@@ -50,8 +50,8 @@ read_when:
 
 ## Phase 7: End-to-end and dogfood
 
-- [ ] T024 [REQ-001,REQ-015,REQ-016] Write `tests/test_e2e.py`: full scan over fixtures → outputs exist, second scan dedups, resolution suppresses then regresses. Verify: `python3 -m unittest tests.test_e2e` → GREEN
-- [ ] T025 [REQ-018] Dogfood run on the real corpus; assert the DEC-012 structural invariants (parse_errors = 0, `isError` coverage 100%, root + subagent counts sum to the file count) and record the run's counts block plus any cue-gate tuning as a dated note in the PR description. Verify: `pi-self-improvement --all --dry-run` → exit 0, parse_errors=0
+- [x] T024 [REQ-001,REQ-015,REQ-016] Write `tests/test_e2e.py`: full scan over fixtures → outputs exist, second scan dedups, resolution suppresses then regresses. Verify: `python3 -m unittest tests.test_e2e` → GREEN
+- [x] T025 [REQ-018] Dogfood run on the real corpus; assert the DEC-012 structural invariants (parse_errors = 0, `isError` coverage 100%, root + subagent counts sum to the file count) and record the run's counts block plus any cue-gate tuning as a dated note in the PR description. Verify: `pi-self-improvement --all --dry-run` → exit 0, parse_errors=0
 
 ## Phase 8: Closing half (REQ-020–REQ-022 slice)
 
