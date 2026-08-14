@@ -109,6 +109,18 @@ class AssistantTurn:
 
 
 @dataclass
+class CustomEntry:
+    """A `custom` record. Kept so config can opt extra signals in (AC-044), never
+    fed to a detector by default — these are extension-specific, and REQ-019 keeps
+    defaults generic."""
+
+    custom_type: str
+    data: dict
+    line: int
+    timestamp: str | None = None
+
+
+@dataclass
 class ParseCounts:
     """Parser self-check counters (REQ-018). Aggregated across a whole scan."""
 
@@ -176,6 +188,7 @@ class SessionSummary:
     tool_calls: list[ToolCall] = field(default_factory=list)
     user_messages: list[UserMessage] = field(default_factory=list)
     assistant_turns: list[AssistantTurn] = field(default_factory=list)
+    custom_entries: list[CustomEntry] = field(default_factory=list)
     counts: ParseCounts = field(default_factory=ParseCounts)
 
     @property
