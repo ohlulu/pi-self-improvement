@@ -2,7 +2,7 @@
 
 A pi-native self-improvement loop: mine your [pi](https://github.com/badlogic/pi-mono) session transcripts for recurring friction — failing CLIs, hanging commands, silently empty results, corrections you keep typing — and stage approval-gated fix proposals. It never changes anything on its own.
 
-**Status: design phase.** The full migration plan lives in [`docs/specs/pi-migration/`](docs/specs/pi-migration/) (requirements / plan / tasks; body text in Traditional Chinese).
+**Status: design phase.** The full migration plan lives in [`docs/specs/pi-migration/`](docs/specs/pi-migration/) (requirements / plan / tasks; body text in Traditional Chinese). Project vocabulary is in [`CONTEXT.md`](CONTEXT.md); the decisions that outlive the plan are in [`docs/adr/`](docs/adr/).
 
 ## Why
 
@@ -18,7 +18,7 @@ Most people point AI at their work. The higher-leverage loop points it at your o
 3. **Detect** real tool usage friction and user corrections — not prose mentions.
 4. **Stage** proposals and a human-readable review packet. Apply stays manual, always.
 
-Plus a closing half: a scheduled headless triage pass (`pi -p` with a no-shell tool allowlist) and an interactive `learn-loop` skill that executes the approved queue.
+Plus a closing half: a scheduled headless triage pass (`pi -p` with a read-only tool allowlist — no shell, no `write`, no `edit`; a deterministic host-side writer is the only thing that touches disk) and an interactive `learn-loop` skill that executes the approved queue.
 
 ## Credits
 
