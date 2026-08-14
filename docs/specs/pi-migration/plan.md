@@ -166,7 +166,7 @@ pi-self-improvement --resolve ROUTE:TARGET --decision {fixed,wontfix,ignored}
 pi-self-improvement --resolve-from decisions.json | --list-resolutions | --unresolve T
 ```
 
-Config keys（`~/.pi-self-improvement/config.json`）：`tracked_clis`、`tracked_cli_suffix`、`cue_packs`（enable/extend）、`extra_scaffold_markers`、`extra_redaction_patterns`、`ext_family_map`、`extra_backlog_ignore`、`include_subagent_failures`、`skill_loaded_custom_types`、`detect_silent_empty`、`silent_empty_fetch_verbs`、`silent_empty_ignore`。
+Config keys（`~/.pi-self-improvement/config.json`）：`extra_session_roots`（REQ-002 的額外 roots，附加於預設 root 之後）、`tracked_clis`、`tracked_cli_suffix`、`cue_packs`（enable/extend）、`extra_scaffold_markers`、`extra_redaction_patterns`、`ext_family_map`、`extra_backlog_ignore`、`include_subagent_failures`、`skill_loaded_custom_types`、`detect_silent_empty`、`silent_empty_fetch_verbs`、`silent_empty_ignore`。
 
 ## Change Map
 

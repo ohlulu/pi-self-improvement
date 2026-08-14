@@ -2,7 +2,7 @@
 
 A pi-native self-improvement loop: mine your [pi](https://github.com/badlogic/pi-mono) session transcripts for recurring friction — failing CLIs, hanging commands, silently empty results, corrections you keep typing — and stage approval-gated fix proposals. It never changes anything on its own.
 
-**Status: the miner works; the closing half is not built yet.** Scanning, detection, routing, staging, state and the CLI are implemented and tested. The scheduled triage pass and the `learn-loop` skill are still to come. The full migration plan lives in [`docs/specs/pi-migration/`](docs/specs/pi-migration/) (requirements / plan / tasks; body text in Traditional Chinese). Project vocabulary is in [`CONTEXT.md`](CONTEXT.md); the decisions that outlive the plan are in [`docs/adr/`](docs/adr/).
+**Status: complete and dogfooded.** Scanning, detection, routing, staging, state, the CLI, the scheduled triage pass, the host-side writer and the `learn-loop` skill are all implemented and tested. The full migration plan lives in [`docs/specs/pi-migration/`](docs/specs/pi-migration/) (requirements / plan / tasks; body text in Traditional Chinese). Project vocabulary is in [`CONTEXT.md`](CONTEXT.md); the decisions that outlive the plan are in [`docs/adr/`](docs/adr/).
 
 ## Why
 
@@ -89,6 +89,7 @@ Optional, at `<output-root>/config.json`. Defaults are deliberately generic: any
 
 | Key | Type | Purpose |
 |-----|------|---------|
+| `extra_session_roots` | list | Extra directories of pi transcripts, scanned in addition to the default. |
 | `tracked_clis` | list | CLIs whose failures and retries you care about. |
 | `tracked_cli_suffix` | list | Suffix rule for the same, default `["-cli"]`. |
 | `cue_packs` | object | Enable, disable or extend correction cue packs (`en`, `zh-Hant`). |
