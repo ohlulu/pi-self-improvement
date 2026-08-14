@@ -42,15 +42,23 @@ def kinds(signals) -> list[str]:
     return [signal.kind for signal in signals]
 
 
+def turn(text: str, line: int = 99):
+    from pi_self_improvement.model import AssistantTurn
+
+    return AssistantTurn(text=text, line=line)
+
+
 class DetectTestCase(unittest.TestCase):
+    config = None
+
     def setUp(self):
         self.redactor = Redactor()
 
-    def detect(self, summary: SessionSummary):
-        return detect.detect_session(summary, redactor=self.redactor)
+    def detect(self, summary: SessionSummary, config=None):
+        return detect.detect_session(summary, redactor=self.redactor, config=config or self.config)
 
-    def only(self, summary: SessionSummary, kind: str):
-        return [signal for signal in self.detect(summary) if signal.kind == kind]
+    def only(self, summary: SessionSummary, kind: str, config=None):
+        return [signal for signal in self.detect(summary, config) if signal.kind == kind]
 
 
 class TestFailureDetection(DetectTestCase):
@@ -269,6 +277,287 @@ class TestAgainstFixtures(DetectTestCase):
         signals = [s for s in self.detect(summary) if s.kind in (detect.FAILURE, detect.HANG)]
 
         self.assertEqual(signals, [])
+
+
+class TestSilentEmpty(DetectTestCase):
+    """REQ-008: a data-intending call that came back empty and nobody noticed."""
+
+    def test_an_unacknowledged_empty_json_list_is_silent_empty(self):
+        """AC-013."""
+        summary = session(
+            call(command="demo-cli list --json", result="[]", is_error=False),
+            assistant_turns=[turn("Sync finished and the build is green, so the workspace is ready.")],
+        )
+
+        signals = self.only(summary, detect.SILENT_EMPTY)
+
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0].detail["command"], "demo-cli list --json")
+
+    def test_an_acknowledged_empty_result_is_not_friction(self):
+        summary = session(
+            call(command="demo-cli list --json", result="[]", is_error=False),
+            assistant_turns=[turn("The list came back empty, so there is nothing to sync.")],
+        )
+
+        self.assertEqual(self.only(summary, detect.SILENT_EMPTY), [])
+
+    def test_acknowledgement_in_traditional_chinese_counts(self):
+        summary = session(
+            call(command="demo-cli list --json", result="[]", is_error=False),
+            assistant_turns=[turn("查詢結果是空的，沒有需要同步的項目。")],
+        )
+
+        self.assertEqual(self.only(summary, detect.SILENT_EMPTY), [])
+
+    def test_only_later_turns_can_acknowledge(self):
+        """A turn before the call cannot have noticed its result."""
+        summary = session(
+            call(command="demo-cli list --json", result="[]", is_error=False, line=40),
+            assistant_turns=[turn("Nothing found so far.", line=10)],
+        )
+
+        self.assertEqual(len(self.only(summary, detect.SILENT_EMPTY)), 1)
+
+    def test_search_tools_are_ignored(self):
+        """AC-014: an empty search result is an answer, not friction."""
+        for command in ("rg --no-heading needle src", "grep -r needle src", "find . -name nope"):
+            with self.subTest(command=command):
+                summary = session(call(command=command, result="", is_error=False))
+                self.assertEqual(self.only(summary, detect.SILENT_EMPTY), [])
+
+    def test_the_builtin_search_tools_are_ignored(self):
+        for tool in ("grep", "find"):
+            with self.subTest(tool=tool):
+                summary = session(call(tool, arguments={"pattern": "needle"}, result="[]", is_error=False))
+                self.assertEqual(self.only(summary, detect.SILENT_EMPTY), [])
+
+    def test_a_call_with_no_data_intent_is_ignored(self):
+        summary = session(call(command="demo-cli sync --all", result="", is_error=False))
+
+        self.assertEqual(self.only(summary, detect.SILENT_EMPTY), [])
+
+    def test_every_empty_payload_shape_counts(self):
+        for payload in ("[]", "{}", "null", "(empty)", "0 rows", "No results found", "   "):
+            with self.subTest(payload=payload):
+                summary = session(call(command="demo-cli list --json", result=payload, is_error=False))
+                self.assertEqual(len(self.only(summary, detect.SILENT_EMPTY)), 1)
+
+    def test_a_non_empty_payload_is_not_flagged(self):
+        summary = session(call(command="demo-cli list --json", result='[{"id": 1}]', is_error=False))
+
+        self.assertEqual(self.only(summary, detect.SILENT_EMPTY), [])
+
+    def test_a_failing_empty_call_is_a_failure_not_a_silent_empty(self):
+        summary = session(call(command="demo-cli list --json", result="", is_error=True))
+
+        self.assertEqual(kinds(self.detect(summary)), [detect.FAILURE])
+
+    def test_detection_can_be_switched_off(self):
+        summary = session(call(command="demo-cli list --json", result="[]", is_error=False))
+        config = detect.DetectConfig(detect_silent_empty=False)
+
+        self.assertEqual(self.only(summary, detect.SILENT_EMPTY, config), [])
+
+    def test_an_extension_tool_fetch_counts(self):
+        summary = session(call("demoext_search_items", arguments={"query": "beta"}, result="[]", is_error=False))
+
+        self.assertEqual(len(self.only(summary, detect.SILENT_EMPTY)), 1)
+
+
+class TestExecutableAttribution(DetectTestCase):
+    """REQ-007: which CLI a piece of tool-route evidence is about."""
+
+    def test_the_executable_becomes_the_subject(self):
+        """AC-011."""
+        summary = session(call(command="demo-cli sync --force", result="boom", is_error=True))
+        config = detect.DetectConfig(tracked_clis=("demo-cli",))
+
+        signal = self.only(summary, detect.FAILURE, config)[0]
+
+        self.assertEqual(signal.subject, "demo-cli")
+        self.assertTrue(signal.detail["tracked"])
+
+    def test_a_bash_execution_is_attributed_the_same_way(self):
+        """AC-043."""
+        summary = session(
+            call(
+                command="demo-cli doctor",
+                result="demo-cli: command not found",
+                kind=KIND_BASH_EXECUTION,
+                is_error=True,
+                exit_code=127,
+            )
+        )
+        config = detect.DetectConfig(tracked_clis=("demo-cli",))
+
+        signal = self.only(summary, detect.FAILURE, config)[0]
+
+        self.assertEqual(signal.subject, "demo-cli")
+        self.assertTrue(signal.detail["tracked"])
+        self.assertEqual(signal.detail["exit_code"], 127)
+
+    def test_a_cancelled_execution_is_tool_route_evidence(self):
+        summary = session(
+            call(
+                command="demo-cli wait",
+                result="",
+                kind=KIND_BASH_EXECUTION,
+                is_error=True,
+            )
+        )
+        summary.tool_calls[0].cancelled = True
+
+        signal = self.only(summary, detect.FAILURE)[0]
+
+        self.assertTrue(signal.detail["cancelled"])
+
+    def test_the_suffix_pattern_tracks_without_an_explicit_entry(self):
+        summary = session(call(command="other-cli push", result="boom", is_error=True))
+        config = detect.DetectConfig(tracked_clis=(), tracked_cli_suffix=("-cli",))
+
+        self.assertTrue(self.only(summary, detect.FAILURE, config)[0].detail["tracked"])
+
+    def test_an_untracked_executable_is_still_attributed_but_not_tracked(self):
+        summary = session(call(command="someprog build", result="boom", is_error=True))
+        config = detect.DetectConfig(tracked_clis=("demo-cli",), tracked_cli_suffix=())
+
+        signal = self.only(summary, detect.FAILURE, config)[0]
+
+        self.assertEqual(signal.subject, "someprog")
+        self.assertFalse(signal.detail["tracked"])
+
+    def test_a_non_bash_tool_keeps_its_tool_name(self):
+        summary = session(call("demoext_get_item", arguments={"id": "1"}, result="boom", is_error=True))
+
+        self.assertEqual(self.only(summary, detect.FAILURE)[0].subject, "demoext_get_item")
+
+
+class TestExecutableExtraction(unittest.TestCase):
+    def test_shapes(self):
+        cases = {
+            "demo-cli sync --force": "demo-cli",
+            "/usr/local/bin/demo-cli sync": "demo-cli",
+            "timeout 120 demo-cli health": "demo-cli",
+            "sudo demo-cli restart": "demo-cli",
+            "DEMO_ENV=1 demo-cli sync": "demo-cli",
+            "env DEMO_ENV=1 demo-cli sync": "demo-cli",
+            "cd /tmp/workspace && demo-cli sync": "demo-cli",
+            "demo-cli": "demo-cli",
+            "": None,
+            "   ": None,
+        }
+        for command, expected in cases.items():
+            with self.subTest(command=command):
+                self.assertEqual(detect.executable_of(command), expected)
+
+    def test_shell_noise_alone_yields_the_noise_itself(self):
+        self.assertEqual(detect.executable_of("cd /tmp"), "cd")
+
+    def test_things_that_are_not_programs_are_rejected(self):
+        """Found on the real corpus: `#` and `[` were being attributed evidence."""
+        for command in ('# Check the thing', '[ "$WORKSPACE" != "" ]', '"quoted thing"'):
+            with self.subTest(command=command):
+                self.assertIsNone(detect.executable_of(command))
+
+    def test_an_argument_is_not_a_subcommand(self):
+        """`grep` and `echo` have arguments here, not subcommands."""
+        for command in ('grep "enum Foo" src', 'echo "=== done ==="', "cat > /tmp/out"):
+            with self.subTest(command=command):
+                self.assertIsNone(detect._analyze(command)[1])
+
+    def test_a_path_is_not_a_subcommand(self):
+        self.assertIsNone(detect._analyze("git /tmp/workspace/repo status")[1])
+
+
+class TestRetryShapes(DetectTestCase):
+    """AC-012: the same subcommand tried three ways, one of which failed."""
+
+    def three_attempts(self, last_is_error=True):
+        return session(
+            call(command="demo-cli sync --force", result="boom", is_error=True, line=3),
+            call(command="demo-cli sync --all", result="boom", is_error=True, line=5),
+            call(command="demo-cli sync --retry 3 --verbose", result="ok", is_error=False, line=7),
+        )
+
+    def test_three_flag_combinations_with_a_failure_are_a_retry(self):
+        signals = self.only(self.three_attempts(), detect.RETRY)
+
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0].subject, "demo-cli")
+        self.assertEqual(signals[0].detail["subcommand"], "sync")
+        self.assertEqual(signals[0].detail["attempts"], 3)
+
+    def test_two_attempts_are_not_a_retry(self):
+        summary = session(
+            call(command="demo-cli sync --force", result="boom", is_error=True, line=3),
+            call(command="demo-cli sync --all", result="ok", is_error=False, line=5),
+        )
+
+        self.assertEqual(self.only(summary, detect.RETRY), [])
+
+    def test_three_clean_attempts_are_not_a_retry(self):
+        summary = session(
+            call(command="demo-cli sync --force", result="ok", is_error=False, line=3),
+            call(command="demo-cli sync --all", result="ok", is_error=False, line=5),
+            call(command="demo-cli sync --verbose", result="ok", is_error=False, line=7),
+        )
+
+        self.assertEqual(self.only(summary, detect.RETRY), [])
+
+    def test_the_same_flags_repeated_are_not_three_combinations(self):
+        summary = session(
+            call(command="demo-cli sync --force", result="boom", is_error=True, line=3),
+            call(command="demo-cli sync --force", result="boom", is_error=True, line=5),
+            call(command="demo-cli sync --force", result="boom", is_error=True, line=7),
+        )
+
+        self.assertEqual(self.only(summary, detect.RETRY), [])
+
+    def test_only_tracked_clis_produce_retry_signals(self):
+        """REQ-007 scopes this to tracked CLIs.
+
+        Without the scope, ordinary exploration reads as retry: on the real corpus
+        it reported `git diff` and `echo` as retry-before-success.
+        """
+        summary = session(
+            call(command="someprog sync --force", result="boom", is_error=True, line=3),
+            call(command="someprog sync --all", result="boom", is_error=True, line=5),
+            call(command="someprog sync --verbose", result="ok", is_error=False, line=7),
+        )
+        config = detect.DetectConfig(tracked_clis=(), tracked_cli_suffix=())
+
+        self.assertEqual(self.only(summary, detect.RETRY, config), [])
+
+        tracked = detect.DetectConfig(tracked_clis=("someprog",), tracked_cli_suffix=())
+        self.assertEqual(len(self.only(summary, detect.RETRY, tracked)), 1)
+
+    def test_different_subcommands_do_not_group(self):
+        summary = session(
+            call(command="demo-cli sync --force", result="boom", is_error=True, line=3),
+            call(command="demo-cli push --all", result="boom", is_error=True, line=5),
+            call(command="demo-cli pull --verbose", result="boom", is_error=True, line=7),
+        )
+
+        self.assertEqual(self.only(summary, detect.RETRY), [])
+
+    def test_the_retry_evidence_points_at_a_real_line(self):
+        signal = self.only(self.three_attempts(), detect.RETRY)[0]
+
+        self.assertIn(signal.evidence.line, {4, 6, 8})
+        self.assertEqual(signal.evidence.source, detect.RETRY)
+
+    def test_the_fixture_session_shows_its_retry(self):
+        alpha = support.FIXTURE_SESSIONS / "--tmp-pi-fixtures-alpha--"
+        summary = parse.parse_transcript(
+            alpha / "2026-01-06T10-00-00-000Z_00000000-0000-7000-8000-00000000a002.jsonl"
+        )
+
+        retries = self.only(summary, detect.RETRY)
+
+        self.assertEqual(len(retries), 1)
+        self.assertEqual(retries[0].detail["subcommand"], "sync")
+        self.assertEqual(retries[0].detail["attempts"], 3)
 
 
 if __name__ == "__main__":

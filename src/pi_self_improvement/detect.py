@@ -19,6 +19,83 @@ from .redact import Redactor
 
 FAILURE = "failure"
 HANG = "hang"
+SILENT_EMPTY = "silent_empty"
+RETRY = "retry"
+
+#: Tool names that run a shell command, so the executable rather than the tool is
+#: what evidence is about.
+_SHELL_TOOLS = frozenset({"bash", "sh", "shell"})
+
+#: Skipped when looking for the executable: they wrap the command that matters.
+_WRAPPERS = frozenset(
+    {"sudo", "env", "command", "nohup", "nice", "time", "timeout", "gtimeout", "caffeinate", "xargs"}
+)
+
+#: Shell built-ins that are rarely the point of a command line.
+_SHELL_NOISE = frozenset({"cd", "export", "set", "source", ".", "unset", "pushd", "popd"})
+
+_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_SEGMENT_SPLIT = re.compile(r"\s*(?:&&|\|\||;|\|)\s*")
+
+#: A program name, as opposed to a comment marker, a test bracket or a quoted
+#: string. Without this, `# Check the thing` attributes evidence to `#`.
+_PLAUSIBLE_EXECUTABLE = re.compile(r"^[A-Za-z0-9_.+-]+$")
+
+#: A subcommand, as opposed to a path, a redirect or a search pattern. `grep
+#: "enum" src` has an argument here, not a subcommand.
+_PLAUSIBLE_SUBCOMMAND = re.compile(r"^[A-Za-z][A-Za-z0-9._-]*$")
+
+#: Verbs that mean "this call went to fetch something".
+DEFAULT_FETCH_VERBS = (
+    "list", "ls", "get", "show", "search", "query", "fetch", "find", "describe",
+    "dump", "export", "view", "read", "inspect", "count", "status", "log", "logs",
+)
+
+#: Tools and executables where an empty answer is the answer, not friction.
+DEFAULT_SILENT_EMPTY_IGNORE = (
+    "grep", "rg", "ag", "ack", "find", "fd", "ls", "locate", "which", "read", "glob",
+)
+
+_EMPTY_PAYLOADS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"^\[\s*\]$",
+        r"^\{\s*\}$",
+        r"^null$",
+        r"^none$",
+        r"^\(empty\)$",
+        r"^0 rows?\b",
+        r"^no results?\b",
+        r"^no matches?\b",
+        r"^no items?\b",
+        r"^nothing found\b",
+    )
+)
+
+#: An agent noticing the emptiness in a later turn. Bilingual, because half the
+#: corpus is Traditional Chinese and an English-only check would call every
+#: acknowledged empty result silent.
+_ACKNOWLEDGEMENTS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\bempty\b",
+        r"\bno results?\b",
+        r"\bno matches?\b",
+        r"\bno items?\b",
+        r"\bnothing\b",
+        r"\bnone (?:found|returned|matched)\b",
+        r"\bdid ?n[o']t find\b",
+        r"\bzero\b",
+        r"沒有",
+        r"找不到",
+        r"空的",
+        r"無結果",
+        r"無資料",
+    )
+)
+
+#: AC-012: three different flag combinations on one subcommand.
+_RETRY_COMBINATIONS = 3
 
 #: Stall shapes, matched against tool *output* only. Matching the command would
 #: flag `timeout 120 foo` as a hang every time it succeeded (AC-010).
@@ -57,12 +134,86 @@ _FAILURE_PATTERNS = tuple(
 )
 
 
-@dataclass
+@dataclass(frozen=True)
 class DetectConfig:
     """Detector knobs. `config.py` (T022) builds one of these; defaults stay generic."""
 
+    tracked_clis: tuple[str, ...] = ()
+    tracked_cli_suffix: tuple[str, ...] = ("-cli",)
+    detect_silent_empty: bool = True
+    silent_empty_fetch_verbs: tuple[str, ...] = DEFAULT_FETCH_VERBS
+    silent_empty_ignore: tuple[str, ...] = DEFAULT_SILENT_EMPTY_IGNORE
+
 
 DEFAULT_CONFIG = DetectConfig()
+
+
+def _analyze(command: str | None) -> tuple[str | None, str | None, tuple[str, ...]]:
+    """Split a command line into (executable, subcommand, distinct flags).
+
+    Whitespace tokenisation on purpose: `shlex` raises on the unbalanced quoting
+    that real transcripts are full of, and this only needs the shape.
+    """
+    if not command or not command.strip():
+        return None, None, ()
+
+    fallback: tuple[str, str | None, tuple[str, ...]] | None = None
+    for segment in _SEGMENT_SPLIT.split(command.strip()):
+        parsed = _analyze_segment(segment)
+        if parsed is None:
+            continue
+        if fallback is None:
+            fallback = parsed
+        if parsed[0] not in _SHELL_NOISE:
+            return parsed
+    return fallback if fallback is not None else (None, None, ())
+
+
+def _analyze_segment(segment: str) -> tuple[str, str | None, tuple[str, ...]] | None:
+    executable: str | None = None
+    subcommand: str | None = None
+    settled = False
+    flags: set[str] = set()
+
+    for token in segment.split():
+        if executable is None:
+            if _ENV_ASSIGNMENT.match(token) or token.isdigit() or token.startswith("-"):
+                continue
+            bare = token.rsplit("/", 1)[-1]
+            if bare in _WRAPPERS:
+                continue
+            if not _PLAUSIBLE_EXECUTABLE.match(bare):
+                # Not a program: a comment marker, `[`, a quoted fragment. Give up
+                # on this segment rather than promoting the next token.
+                return None
+            executable = bare
+            continue
+        if token.startswith("-"):
+            flags.add(token)
+        elif not settled:
+            # The subcommand is the first non-flag token or there is none. Scanning
+            # further finds arguments: `grep "enum Foo" src` would yield `src`.
+            settled = True
+            if _PLAUSIBLE_SUBCOMMAND.match(token):
+                subcommand = token
+
+    if executable is None:
+        return None
+    return executable, subcommand, tuple(sorted(flags))
+
+
+def executable_of(command: str | None) -> str | None:
+    """The program a command line actually runs, wrappers and env prefixes aside."""
+    return _analyze(command)[0]
+
+
+def is_tracked(name: str | None, config: DetectConfig) -> bool:
+    """REQ-007: the config list decides, the suffix pattern is the fallback."""
+    if not name:
+        return False
+    if name in config.tracked_clis:
+        return True
+    return any(suffix and name.endswith(suffix) for suffix in config.tracked_cli_suffix)
 
 
 @dataclass(frozen=True)
@@ -84,23 +235,143 @@ def detect_session(
     """Detect every friction signal in one session, in transcript order."""
     config = config or DEFAULT_CONFIG
     signals: list[Signal] = []
+    troubled: set[int] = set()
+
     for call in summary.tool_calls:
-        signals.extend(_detect_call(summary, call, redactor))
+        signal = _detect_call(summary, call, redactor, config)
+        if signal is None:
+            continue
+        signals.append(signal)
+        if signal.kind in (FAILURE, HANG):
+            troubled.add(id(call))
+
+    signals.extend(_detect_retries(summary, redactor, config, troubled))
     return signals
 
 
-def _detect_call(summary: SessionSummary, call: ToolCall, redactor: Redactor) -> list[Signal]:
+def _detect_call(
+    summary: SessionSummary, call: ToolCall, redactor: Redactor, config: DetectConfig
+) -> Signal | None:
     if not call.matched:
         # A call with no result never completed as far as the transcript knows.
-        return []
+        return None
 
     stall = _hang_pattern(call)
     if stall is not None:
         # A stall is one piece of friction, not a hang plus a failure.
-        return [_signal(HANG, summary, call, redactor, focus=stall)]
+        return _signal(HANG, summary, call, redactor, config, focus=stall)
     if _is_failure(call):
-        return [_signal(FAILURE, summary, call, redactor)]
-    return []
+        return _signal(FAILURE, summary, call, redactor, config)
+    if _is_silent_empty(summary, call, config):
+        return _signal(SILENT_EMPTY, summary, call, redactor, config)
+    return None
+
+
+def _is_silent_empty(summary: SessionSummary, call: ToolCall, config: DetectConfig) -> bool:
+    """REQ-008: a call that went looking for data, found none, and nobody said so."""
+    if not config.detect_silent_empty:
+        return False
+    if call.is_error is not False:
+        # Errors are already reported as failures; only a clean call can be silent.
+        return False
+    if not _is_empty_payload(call.result_text):
+        return False
+
+    executable, subcommand, _ = _analyze(call.command)
+    is_shell = call.kind == KIND_BASH_EXECUTION or call.tool_name in _SHELL_TOOLS
+    ignore = {name.lower() for name in config.silent_empty_ignore}
+    if (executable or "").lower() in ignore or call.tool_name.lower() in ignore:
+        return False
+    if not _has_data_intent(call, executable, subcommand, is_shell, config):
+        return False
+    return not _acknowledged_after(summary, call)
+
+
+def _is_empty_payload(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return True
+    return any(pattern.match(stripped) for pattern in _EMPTY_PAYLOADS)
+
+
+def _has_data_intent(
+    call: ToolCall,
+    executable: str | None,
+    subcommand: str | None,
+    is_shell: bool,
+    config: DetectConfig,
+) -> bool:
+    verbs = {verb.lower() for verb in config.silent_empty_fetch_verbs}
+    if is_shell:
+        command = call.command or ""
+        if "--json" in command or "-o json" in command or "--format json" in command:
+            return True
+        return (subcommand or "").lower() in verbs or (executable or "").lower() in verbs
+    # An extension tool's flat name carries its verb: `demoext_search_items`.
+    return bool(verbs & set(re.split(r"[_\-]", call.tool_name.lower())))
+
+
+def _acknowledged_after(summary: SessionSummary, call: ToolCall) -> bool:
+    """Did any later agent turn notice the emptiness?"""
+    boundary = call.evidence_line
+    for assistant_turn in summary.assistant_turns:
+        if assistant_turn.line <= boundary:
+            continue
+        if any(pattern.search(assistant_turn.text) for pattern in _ACKNOWLEDGEMENTS):
+            return True
+    return False
+
+
+def _detect_retries(
+    summary: SessionSummary, redactor: Redactor, config: DetectConfig, troubled: set[int]
+) -> list[Signal]:
+    """REQ-007 retry-before-success: one subcommand tried several ways, one failing.
+
+    Flag *variation* is the signal, not repetition: running the identical command
+    three times is one habit, while three different flag sets is someone hunting
+    for the incantation that works.
+    """
+    groups: dict[tuple[str, str], list[ToolCall]] = {}
+    combos: dict[tuple[str, str], set[tuple[str, ...]]] = {}
+    for call in summary.tool_calls:
+        if not call.command:
+            continue
+        executable, subcommand, flags = _analyze(call.command)
+        if not executable or not subcommand:
+            continue
+        if not is_tracked(executable, config):
+            # REQ-007 scopes tool-route attribution to tracked CLIs. Without that
+            # scope, `git diff` with three flag sets reads as a retry when it is
+            # just someone looking around.
+            continue
+        key = (executable, subcommand)
+        groups.setdefault(key, []).append(call)
+        combos.setdefault(key, set()).add(flags)
+
+    signals: list[Signal] = []
+    for (executable, subcommand), calls in groups.items():
+        if len(combos[(executable, subcommand)]) < _RETRY_COMBINATIONS:
+            continue
+        failing = [call for call in calls if id(call) in troubled]
+        if not failing:
+            continue
+        anchor = failing[-1]
+        signals.append(
+            Signal(
+                kind=RETRY,
+                subject=executable,
+                evidence=_evidence(RETRY, summary, anchor, redactor),
+                detail={
+                    "executable": executable,
+                    "subcommand": subcommand,
+                    "attempts": len(calls),
+                    "flag_combinations": len(combos[(executable, subcommand)]),
+                    "tracked": is_tracked(executable, config),
+                    "command": redactor.command(anchor.command),
+                },
+            )
+        )
+    return signals
 
 
 def _is_failure(call: ToolCall) -> bool:
@@ -130,23 +401,40 @@ def _hang_pattern(call: ToolCall) -> re.Pattern | None:
     return None
 
 
+def _subject_of(call: ToolCall, config: DetectConfig) -> str:
+    """What the signal is about: the executable for a shell call, else the tool.
+
+    REQ-013 keys both the tool and backlog routes on the executable name, so a
+    `bash` subject would collapse every shell failure onto one meaningless target.
+    """
+    if call.kind == KIND_BASH_EXECUTION or call.tool_name in _SHELL_TOOLS:
+        executable = executable_of(call.command)
+        if executable:
+            return executable
+    return call.tool_name
+
+
 def _signal(
     kind: str,
     summary: SessionSummary,
     call: ToolCall,
     redactor: Redactor,
+    config: DetectConfig,
     focus: re.Pattern | None = None,
 ) -> Signal:
-    detail = {"tool": call.tool_name}
+    subject = _subject_of(call, config)
+    detail = {"tool": call.tool_name, "tracked": is_tracked(subject, config)}
     if call.command:
         detail["command"] = redactor.command(call.command)
     if call.exit_code is not None:
         detail["exit_code"] = call.exit_code
     if call.kind == KIND_BASH_EXECUTION:
         detail["bash_execution"] = True
+    if call.cancelled:
+        detail["cancelled"] = True
     return Signal(
         kind=kind,
-        subject=call.tool_name,
+        subject=subject,
         evidence=_evidence(kind, summary, call, redactor, focus),
         detail=detail,
     )
