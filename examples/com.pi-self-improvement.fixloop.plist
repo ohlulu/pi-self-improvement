@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.pi-self-improvement.fixloop</string>
+
+    <!-- Daily at 09:45, half an hour after the miner's slot so a scan that
+         ran this morning is already staged when triage starts. -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key><integer>9</integer>
+            <key>Minute</key><integer>45</integer>
+        </dict>
+    </array>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/CHANGEME/.pi-self-improvement/bin/fixloop-run.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Wall-clock fuse in seconds. pi has no turn limit, so this is the
+             only bound on an unattended run. -->
+        <key>FIXLOOP_FUSE</key>
+        <string>900</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/CHANGEME/Library/Logs/pi-self-improvement-fixloop.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/CHANGEME/Library/Logs/pi-self-improvement-fixloop.err</string>
+</dict>
+</plist>

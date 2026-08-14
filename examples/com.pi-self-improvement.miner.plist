@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.pi-self-improvement.miner</string>
+
+    <!-- Twice weekly: Monday and Thursday at 09:15.
+         The gaps are 3 and 4 days, so if one fire is missed the longest
+         interval between two successful runs is 7 days. A window of 8 days
+         therefore covers a missed fire with a day to spare (AC-037). -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Weekday</key><integer>1</integer>
+            <key>Hour</key><integer>9</integer>
+            <key>Minute</key><integer>15</integer>
+        </dict>
+        <dict>
+            <key>Weekday</key><integer>4</integer>
+            <key>Hour</key><integer>9</integer>
+            <key>Minute</key><integer>15</integer>
+        </dict>
+    </array>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/CHANGEME/.pi-self-improvement/bin/miner-run.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PSI_SINCE_DAYS</key>
+        <string>8</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- Catch up after the machine was asleep at the scheduled time. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/CHANGEME/Library/Logs/pi-self-improvement-miner.out</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/CHANGEME/Library/Logs/pi-self-improvement-miner.err</string>
+</dict>
+</plist>

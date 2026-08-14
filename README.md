@@ -110,6 +110,53 @@ Optional, at `<output-root>/config.json`. Defaults are deliberately generic: any
 }
 ```
 
+## Scheduling (macOS)
+
+Two launchd jobs: the miner twice weekly, the triage pass daily. Examples are in [`examples/`](examples/), runners in [`templates/`](templates/).
+
+```bash
+mkdir -p ~/.pi-self-improvement/bin
+cp templates/miner-run.sh templates/fixloop-run.sh templates/fixloop-prompt.md ~/.pi-self-improvement/bin/
+chmod +x ~/.pi-self-improvement/bin/*.sh
+
+# replace CHANGEME with your home directory, then load
+sed "s|/Users/CHANGEME|$HOME|g" examples/com.pi-self-improvement.miner.plist \
+  > ~/Library/LaunchAgents/com.pi-self-improvement.miner.plist
+sed "s|/Users/CHANGEME|$HOME|g" examples/com.pi-self-improvement.fixloop.plist \
+  > ~/Library/LaunchAgents/com.pi-self-improvement.fixloop.plist
+
+launchctl load ~/Library/LaunchAgents/com.pi-self-improvement.miner.plist
+launchctl load ~/Library/LaunchAgents/com.pi-self-improvement.fixloop.plist
+```
+
+Both runners write one `RUN` line per fire to `~/Library/Logs/`, on every exit path including failure. That line is how you tell "ran, found nothing" apart from "never fired":
+
+```bash
+tail ~/Library/Logs/pi-self-improvement-miner.log
+tail ~/Library/Logs/pi-self-improvement-fixloop.log
+```
+
+**The window overlaps the schedule on purpose.** The miner fires Monday and Thursday with `--since-days 8`. Those gaps are 3 and 4 days, so if one fire is missed the longest interval between two successful runs is 7 days — and 8 > 7, so a missed fire cannot leave a blind spot. Change the schedule and you must change the window with it; `tests/test_scheduling.py` computes this from the plists and fails if the two drift apart.
+
+### First run after installing
+
+Scheduled runs mine the window only. They will never reach back over history you already have, so a fresh install quietly ignores everything older than 8 days.
+
+Backfill once, explicitly, and preview it first:
+
+```bash
+pi-self-improvement --all --dry-run | less   # writes nothing at all
+pi-self-improvement --all                    # or --max-sessions 200 to cap it
+```
+
+The preview is genuinely inert — it records no state — so running it cannot cause the real backfill to suppress itself.
+
+## The closing half
+
+The daily job runs `pi -p` with `--tools read,grep,find,ls` to triage the newest review packet. It has no shell and no write access, and its output is structured triage that a deterministic host-side writer turns into files. That split is the safety model: a tool allowlist can say which tools, not which paths, so a model with `write` could edit skills and source directly no matter what the prompt says.
+
+Triage lands in `queue/FIX-QUEUE.md` and one `decisions/<ID>.json` per incident. Work through the queue interactively with the [`learn-loop`](skills/learn-loop/SKILL.md) skill, which is where a human approves and applies anything.
+
 ## Privacy
 
 Every transcript-derived string passes one redaction boundary before it reaches disk — commands, arguments, excerpts, summaries, paths. Emails, phone numbers, auth headers, cloud keys, private-key blocks, JWTs and long opaque tokens are masked. A corpus test asserts that none of a canary set survives into a written output root; a second test asserts `--full` *does* leak them, so the first cannot pass by staging nothing.
