@@ -32,8 +32,8 @@ read_when:
 
 ## Phase 5: Skill and corrections (REQ-009–REQ-012 slice)
 
-- [ ] T012 [REQ-009] Implement skill-invocation detection from `read` paths ending in `SKILL.md` as the specification default, plus optional `skill_loaded_custom_types` entries, with tests covering AC-015, AC-044. Verify: `python3 -m unittest tests.test_detect` → GREEN
-- [ ] T013 [REQ-010] Implement `cues.py` (pack model, `en` + `zh-Hant` per DEC-008 table, gates, negative guards) plus corrections corpus test including known false positives (pasted doc "instead", affirmative 「沒錯」). Covers AC-016–AC-018. Verify: `python3 -m unittest tests.test_corrections_corpus` → GREEN
+- [x] T012 [REQ-009] Implement skill-invocation detection from `read` paths ending in `SKILL.md` as the specification default, plus optional `skill_loaded_custom_types` entries, with tests covering AC-015, AC-044. Verify: `python3 -m unittest tests.test_detect` → GREEN
+- [x] T013 [REQ-010] Implement `cues.py` (pack model, `en` + `zh-Hant` per DEC-008 table, gates, negative guards) plus corrections corpus test including known false positives (pasted doc "instead", affirmative 「沒錯」). Covers AC-016–AC-018. Verify: `python3 -m unittest tests.test_corrections_corpus` → GREEN
 - [ ] T014 [REQ-011] Implement scaffold filter: structural exclusion of non-`message` records first, then the two DEC-009 markers plus config extras, with corpus test covering AC-019, AC-020, and AC-045 (a user message that merely discusses a marker is not scaffold). Verify: `python3 -m unittest tests.test_scaffold_corpus` → GREEN
 - [ ] T015 [REQ-012] Implement subagent exclusion keyed on the nested `<session-id>/<hash>/run-N/session.jsonl` path shape (origin flag from T005 gates backlog/corrections; config override) with test covering AC-021. Verify: `python3 -m unittest tests.test_detect` → GREEN
 
