@@ -22,10 +22,11 @@ The system MUST NOT modify skills, memory files, configuration, or source code; 
 
 ### REQ-002: Session collection
 
-WHEN a scan runs, the system SHALL discover pi session transcripts under `~/.pi/agent/sessions/**/*.jsonl` 與 config 指定的額外 roots，並以時間窗過濾。
+WHEN a scan runs, the system SHALL discover pi session transcripts under `~/.pi/agent/sessions/**/*.jsonl` 與 config 指定的額外 roots，並以時間窗過濾。首次執行（state 尚不存在）MUST NOT 觸發自動 backfill：時間窗外的歷史 session 僅經由顯式 `--all` 進入 scan。
 
 - AC-002: GIVEN `--since-days 1` 與一個 mtime 為 3 天前的 session WHEN scan THEN 該 session 不被解析
 - AC-003: GIVEN `--max-sessions N` WHEN 過濾後 session 數超過 N THEN 僅保留最新的 N 個
+- AC-038: GIVEN 全新 output root（無 `state.json`）與 mtime 在窗外的歷史 session WHEN `--since-days N` scan THEN 該 session 不被解析；WHEN 同條件改跑 `--all` THEN 該 session 納入
 
 ### REQ-003: Normalized event model
 

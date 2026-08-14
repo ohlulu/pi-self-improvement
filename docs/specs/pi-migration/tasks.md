@@ -15,7 +15,7 @@ read_when:
 
 ## Phase 2: Parse (REQ-002, REQ-005 slice)
 
-- [ ] T004 [REQ-002,REQ-005] Write failing tests for `parse.py`: session discovery windowing, role mapping, toolCall/toolResult pairing by `toolCallId`, cwd/timestamps, subagent origin flag. Verify: `python3 -m unittest tests.test_parse` → RED
+- [ ] T004 [REQ-002,REQ-005] Write failing tests for `parse.py`: session discovery windowing (`--since-days` excludes out-of-window history regardless of state presence, `--all` includes it; AC-002, AC-038), role mapping, toolCall/toolResult pairing by `toolCallId`, cwd/timestamps, subagent origin flag. Verify: `python3 -m unittest tests.test_parse` → RED
 - [ ] T005 [REQ-002,REQ-005] Implement `parse.py`. Verify: `python3 -m unittest tests.test_parse` → GREEN
 
 ## Phase 3: Redaction (REQ-004 slice)
@@ -57,7 +57,7 @@ read_when:
 
 - [ ] T026 [REQ-020] Write `skills/learn-loop/SKILL.md` (pi skill format: survey → select → approve → fix → verify → decide; store paths per DEC-010). Verify: `head -20 skills/learn-loop/SKILL.md` → valid frontmatter with name + description
 - [ ] T027 [REQ-020] Write `templates/fixloop-prompt.md` and `templates/fixloop-run.sh` (`pi -p` with `--tools read,grep,find,ls,write,edit`, shell-implemented wall-clock fuse, unconditional RUN line to `~/Library/Logs`). Verify: `bash -n templates/fixloop-run.sh` → exit 0; `grep -c bash templates/fixloop-run.sh` allowlist line → 0 occurrences of bash in `--tools` value
-- [ ] T028 [REQ-021] Write `templates/miner-run.sh` and `examples/*.plist` (miner twice weekly `--since-days 4`, fixloop daily) plus an install section in README. Verify: `plutil -lint examples/*.plist` → OK
+- [ ] T028 [REQ-021] Write `templates/miner-run.sh` and `examples/*.plist` (miner twice weekly `--since-days 4`, fixloop daily) plus an install section in README including a bootstrap note: scheduled runs mine only the window; pre-existing history is backfilled once via explicit `--all` (preview with `--all --dry-run`, cap with `--max-sessions`). Verify: `plutil -lint examples/*.plist` → OK
 
 ## Human Acceptance
 

@@ -109,6 +109,13 @@ CJK cue 以 substring + guard 比對（不用 `\b`，漢字無詞界）；guard 
 **Rationale**: 上游的 redaction corpus test 是其安全模型的執行機制，照搬；false-positive corpus 把 feasibility 調查抓到的實際誤判釘成 regression tests。
 **Satisfies**: REQ-004、REQ-010、REQ-018、NFR
 
+### DEC-013: Fresh-install bootstrap: no automatic backfill
+
+**Choice**: scan 行為不因 state 存在與否而改變——首次執行（`state.json` 不存在）時 windowed scan 與平常完全相同，時間窗外的歷史 session 只能由顯式 `--all` 帶入；README install 段提供 bootstrap 指引（先 `--all --dry-run` 預覽，再決定是否實跑 backfill，`--max-sessions` 作為上限）。
+**Alternatives**: 偵測到無 state 時自動掃全部歷史——首份 review packet 會被整個歷史的 proposal 灌爆，違背小批次人工核准的工作模型，且排程首次 fire 的成本不可預測。
+**Rationale**: 可預測性優先：在已有 pi 歷史的機器上首次安裝，排程的第一次執行與其後每次執行行為一致；backfill 是一次性、有人看管的顯式動作。
+**Satisfies**: REQ-002
+
 ## Interfaces / Contracts
 
 CLI（安裝後指令名 `pi-self-improvement`）：
