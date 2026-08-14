@@ -105,6 +105,18 @@ _ACKNOWLEDGEMENTS = tuple(
 #: AC-012: three different flag combinations on one subcommand.
 _RETRY_COMBINATIONS = 3
 
+#: DEC-009 scaffold markers. Deliberately only two.
+#:
+#: Pi expresses injected context as its own record type, so the strongest filter
+#: is the data model, not a regex — `custom_message` never becomes a user message
+#: in the first place (AC-020). What is left are the two shapes measured *inside*
+#: user message bodies: an orchestrator steering block's box-drawing rule, and a
+#: subagent task seed. Marker lists that also contain `[Project docs index]` or
+#: `Cymbal suggests:` misfire the moment someone talks *about* those injections
+#: (AC-045), and they buy nothing, because those arrive as separate records.
+_SCAFFOLD_SEPARATOR = re.compile("\u2500{10,}")
+_SCAFFOLD_TASK_SEED = re.compile(r"^\s*Task:")
+
 #: Stall shapes, matched against tool *output* only. Matching the command would
 #: flag `timeout 120 foo` as a hang every time it succeeded (AC-010).
 _HANG_PATTERNS = tuple(
@@ -156,6 +168,9 @@ class DetectConfig:
     #: on anyone else's machine.
     skill_loaded_custom_types: tuple[str, ...] = ()
     cue_packs: tuple[cues.CuePack, ...] = cues.BUILTIN_PACKS
+    extra_scaffold_markers: tuple[str, ...] = ()
+    #: REQ-012: a subagent's failures stay out of the backlog unless asked for.
+    include_subagent_failures: bool = False
 
 
 DEFAULT_CONFIG = DetectConfig()
@@ -302,6 +317,23 @@ def _skill_name_from(path: str) -> str | None:
     return parts[-2]
 
 
+def is_scaffold(text: str, config: DetectConfig | None = None) -> bool:
+    """REQ-011: text that the harness or an extension injected, not the user.
+
+    The loop has to eat its own dog food here. An injection its own harness makes
+    will otherwise be mined as user friction, and the tool ends up filing
+    proposals against itself.
+    """
+    config = config or DEFAULT_CONFIG
+    if not text:
+        return False
+    if _SCAFFOLD_SEPARATOR.search(text):
+        return True
+    if _SCAFFOLD_TASK_SEED.match(text):
+        return True
+    return any(marker and marker in text for marker in config.extra_scaffold_markers)
+
+
 def _detect_corrections(
     summary: SessionSummary, redactor: Redactor, config: DetectConfig
 ) -> list[Signal]:
@@ -309,14 +341,18 @@ def _detect_corrections(
 
     Only a message that follows an assistant turn can be a correction — there is
     nothing to correct before the agent has answered (AC-016).
+
+    A subagent session has no user messages at all: what sits in the `user` role
+    is a prompt the orchestrating agent wrote (REQ-012). Reading those as
+    corrections would have the loop mine its own instructions.
     """
-    if not summary.assistant_turns or not config.cue_packs:
+    if not summary.assistant_turns or not config.cue_packs or summary.is_subagent:
         return []
     first_answer = min(turn.line for turn in summary.assistant_turns)
 
     signals: list[Signal] = []
     for message in summary.user_messages:
-        if message.line <= first_answer:
+        if message.line <= first_answer or is_scaffold(message.text, config):
             continue
         hit = cues.find_cue(message.text, config.cue_packs)
         if hit is None:
@@ -532,7 +568,13 @@ def _signal(
     focus: re.Pattern | None = None,
 ) -> Signal:
     subject = _subject_of(call, config)
-    detail = {"tool": call.tool_name, "tracked": is_tracked(subject, config)}
+    detail = {
+        "tool": call.tool_name,
+        "tracked": is_tracked(subject, config),
+        # REQ-012: routing reads this to keep a subagent's failures out of the
+        # backlog. The signal is still detected and still counted.
+        "backlog_eligible": not summary.is_subagent or config.include_subagent_failures,
+    }
     if call.command:
         detail["command"] = redactor.command(call.command)
     if call.exit_code is not None:

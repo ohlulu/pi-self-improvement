@@ -236,6 +236,59 @@ class TestHangDetection(DetectTestCase):
         self.assertEqual(self.only(summary, detect.HANG), [])
 
 
+class TestSubagentExclusion(DetectTestCase):
+    """REQ-012: a subagent session is not the user, and its failures are not the
+    user's backlog."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.path = (
+            support.FIXTURE_SESSIONS
+            / "--tmp-pi-fixtures-alpha--"
+            / "2026-01-05T09-00-00-000Z_00000000-0000-7000-8000-00000000a001"
+            / "9f2c1ab4d7"
+            / "run-1"
+            / "session.jsonl"
+        )
+
+    def test_the_fixture_is_recognised_as_a_subagent_session(self):
+        self.assertTrue(parse.parse_transcript(self.path).is_subagent)
+
+    def test_a_subagent_failure_is_detected_but_not_backlog_eligible(self):
+        """AC-021: still counted, just not the user's problem to file."""
+        summary = parse.parse_transcript(self.path)
+
+        failures = self.only(summary, detect.FAILURE)
+
+        self.assertEqual(len(failures), 1)
+        self.assertFalse(failures[0].detail["backlog_eligible"])
+        self.assertEqual(failures[0].evidence.origin, "subagent")
+
+    def test_config_can_opt_the_failures_in(self):
+        summary = parse.parse_transcript(self.path)
+        config = detect.DetectConfig(include_subagent_failures=True)
+
+        self.assertTrue(self.only(summary, detect.FAILURE, config)[0].detail["backlog_eligible"])
+
+    def test_a_root_session_failure_is_always_eligible(self):
+        summary = session(call(command="demo-cli sync", result="boom", is_error=True))
+
+        self.assertTrue(self.only(summary, detect.FAILURE)[0].detail["backlog_eligible"])
+
+    def test_an_injected_prompt_is_never_a_correction(self):
+        """The subagent seed contains a strong English cue verbatim.
+
+        What sits in the `user` role of a subagent session was written by the
+        orchestrating agent, so counting it would have the loop mine its own
+        instructions.
+        """
+        summary = parse.parse_transcript(self.path)
+        seed = summary.user_messages[0].text
+
+        self.assertIn("That's wrong", seed)
+        self.assertEqual(self.only(summary, detect.CORRECTION), [])
+
+
 class TestAgainstFixtures(DetectTestCase):
     """The synthetic corpus, end to end through parse + detect."""
 
