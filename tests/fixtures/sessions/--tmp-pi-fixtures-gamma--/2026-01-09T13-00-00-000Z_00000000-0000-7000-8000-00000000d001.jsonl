@@ -1,0 +1,4 @@
+{"schema":"legacy-export","exportedAt":"2026-01-09T13:00:00.000Z","note":"Non-canonical: no session header record, flat message shape, unknown keys."}
+{"role":"user","text":"Why did the packaging step fail?","at":"2026-01-09T13:00:01.000Z"}
+{"role":"assistant","text":"The archive helper could not resolve the workspace path.","at":"2026-01-09T13:00:02.000Z"}
+{"role":"tool","tool":"bash","cmd":"demo-cli package","stdout":"demo-cli: error: workspace path unresolved","status":1,"at":"2026-01-09T13:00:03.000Z"}
