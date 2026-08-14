@@ -8,6 +8,7 @@ venv/
 .pi/subagents/
 .pi/settings.json
 .pi/ralph/
+.pi/git/
 private/
 *.local.json
 build/
