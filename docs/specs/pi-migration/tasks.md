@@ -39,8 +39,8 @@ read_when:
 
 ## Phase 6: Routing, staging, state (REQ-013–REQ-019 slice)
 
-- [ ] T016 [REQ-013] Implement `route.py` (4 routes, the REQ-013 target table with realpath → git-toplevel normalization, `MAX_CORRECTIONS_PER_SESSION` = 3, discard rules) with tests covering AC-022–AC-024 and AC-046 (a repo and its worktree share one target). Verify: `python3 -m unittest tests.test_route` → GREEN
-- [ ] T017 [REQ-014] Implement ext-family grouping (builtin denylist, first-underscore token, config map) with tests covering AC-025, AC-026. Verify: `python3 -m unittest tests.test_route` → GREEN
+- [x] T016 [REQ-013] Implement `route.py` (4 routes, the REQ-013 target table with realpath → git-toplevel normalization, `MAX_CORRECTIONS_PER_SESSION` = 3, discard rules) with tests covering AC-022–AC-024 and AC-046 (a repo and its worktree share one target). Verify: `python3 -m unittest tests.test_route` → GREEN
+- [x] T017 [REQ-014] Implement ext-family grouping (builtin denylist, first-underscore token, config map) with tests covering AC-025, AC-026. Verify: `python3 -m unittest tests.test_route` → GREEN
 - [ ] T018 [REQ-015] Implement `stage.py` (run metadata, proposal JSON, review packet with recurring-first ordering) with tests covering AC-027, AC-028. Verify: `python3 -m unittest tests.test_stage` → GREEN
 - [ ] T019 [REQ-016] Implement `state.py` seen-keys + deterministic proposal ids + recurrence history, with the fixed pipeline order resolution → seen → staging → recurrence, tests covering AC-029, AC-030, AC-047. Verify: `python3 -m unittest tests.test_state` → GREEN
 - [ ] T020 [REQ-017] Implement resolutions registry (watermark suppression, regression re-emission, `wontfix`/`ignored` permanent suppress, pre-watermark history trim, `decisions.json` import) with tests covering AC-031, AC-032, AC-049. Verify: `python3 -m unittest tests.test_state` → GREEN
