@@ -12,7 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import detect, parse, route, stage, state
+from . import detect, parse, route, stage, state, writer
 from .config import DEFAULT_OUTPUT_ROOT, Config, ConfigError
 
 EXIT_OK = 0
@@ -51,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--by", default=None)
     parser.add_argument("--resolved-at", default=None, metavar="TS")
     parser.add_argument("--resolve-from", metavar="decisions.json")
+    parser.add_argument(
+        "--write-queue",
+        metavar="TRIAGE_JSON",
+        help="consume a headless triage result and write the queue (host-side writer)",
+    )
     parser.add_argument("--list-resolutions", action="store_true")
     parser.add_argument("--unresolve", metavar="ROUTE:TARGET")
     return parser
@@ -68,9 +73,26 @@ def main(argv=None, *, stdout=None, stderr=None) -> int:
         print(f"error: {error}", file=err)
         return EXIT_ERROR
 
+    if args.write_queue:
+        return _run_write_queue(args, out, err)
     if args.resolve or args.resolve_from or args.list_resolutions or args.unresolve:
         return _run_resolutions(args, out, err)
     return _run_scan(args, config, out, err)
+
+
+def _run_write_queue(args, out, err) -> int:
+    """The only path by which unattended triage reaches disk (ADR-0006)."""
+    try:
+        triage = writer.parse_triage(args.write_queue)
+        result = writer.write_triage(_output_root(args), triage, machine=args.machine)
+    except (writer.TriageError, writer.OutputRootEscape) as error:
+        print(f"error: {error}", file=err)
+        return EXIT_ERROR
+    print(
+        f"queued {result.queued}, dropped {result.dropped}; {result.queue_path}",
+        file=out,
+    )
+    return EXIT_OK
 
 
 def _output_root(args) -> Path:

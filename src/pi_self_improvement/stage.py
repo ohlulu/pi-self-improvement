@@ -66,11 +66,11 @@ def write_run(
 
     proposal_paths = []
     for item in staged:
-        path = _resolve(root, f"{PROPOSALS_DIR}/{run_id}/{item.id}.json")
+        path = resolve_within(root, f"{PROPOSALS_DIR}/{run_id}/{item.id}.json")
         _write_json(path, _proposal_payload(item, run_id, local_only, machine))
         proposal_paths.append(path)
 
-    run_path = _resolve(root, f"{RUNS_DIR}/{run_id}.json")
+    run_path = resolve_within(root, f"{RUNS_DIR}/{run_id}.json")
     _write_json(
         run_path,
         {
@@ -97,7 +97,7 @@ def write_run(
         },
     )
 
-    packet_path = _resolve(root, f"{PACKETS_DIR}/{run_id}.md")
+    packet_path = resolve_within(root, f"{PACKETS_DIR}/{run_id}.md")
     _write_text(packet_path, render_packet(staged, run_id, counts, local_only, warnings, machine))
 
     return StageResult(
@@ -211,8 +211,13 @@ def _render_counts(counts: ParseCounts) -> list[str]:
     return lines
 
 
-def _resolve(root: Path, relative: str) -> Path:
-    """Every write goes through here, so nothing can escape the output root."""
+def resolve_within(root: Path, relative: str) -> Path:
+    """Every write in this package goes through here (AC-001, AC-052).
+
+    Shared with `writer.py` deliberately: two implementations of one safety
+    guarantee is one implementation too many, and this is the guarantee the
+    project's headline promise rests on.
+    """
     base = root.expanduser().resolve()
     candidate = (base / relative).resolve()
     if candidate != base and base not in candidate.parents:
