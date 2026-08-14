@@ -20,6 +20,21 @@ Most people point AI at their work. The higher-leverage loop points it at your o
 
 Plus a closing half: a scheduled headless triage pass (`pi -p` with a read-only tool allowlist — no shell, no `write`, no `edit`; a deterministic host-side writer is the only thing that touches disk) and an interactive `learn-loop` skill that executes the approved queue.
 
+## Development
+
+Python >= 3.10, standard library only — no runtime or test dependencies.
+
+```bash
+# run the suite from a bare checkout (tests/__init__.py puts src/ on sys.path)
+python3 -m unittest discover -s tests -t .
+
+# or install the package first, then discovery works from anywhere
+pip install -e .
+python3 -m unittest discover -s tests
+```
+
+Ad-hoc imports from a checkout need `src/` on the path: `PYTHONPATH=src python3 -c "..."`.
+
 ## Credits
 
 Concept, safety model, and many hard-won precision lessons come from [agent-improvement-loop](https://github.com/cathrynlavery/agent-improvement-loop) by Little Might (MIT). This is an independent reimplementation for the pi ecosystem.

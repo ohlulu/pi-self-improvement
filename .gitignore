@@ -7,6 +7,7 @@ venv/
 .pi-self-improvement/
 .pi/subagents/
 .pi/settings.json
+.pi/ralph/
 private/
 *.local.json
 build/
