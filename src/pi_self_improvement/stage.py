@@ -14,15 +14,12 @@ from pathlib import Path
 
 from .model import ParseCounts
 from .redact import Redactor
+from .safeio import OutputRootEscape, resolve_within, write_json, write_text
 from .state import SCHEMA_VERSION, Staged, self_check
 
 RUNS_DIR = "runs"
 PROPOSALS_DIR = "proposals"
 PACKETS_DIR = "review-packets"
-
-
-class OutputRootEscape(RuntimeError):
-    """Raised when a write would land outside the output root."""
 
 
 @dataclass
@@ -38,7 +35,26 @@ class StageResult:
 
 
 def new_run_id(moment: float | None = None) -> str:
-    return time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(moment if moment is not None else time.time()))
+    """A run id that is unique and sorts chronologically as a string.
+
+    Microseconds are in the id rather than a collision suffix on purpose: two
+    scans in the same second used to share a metadata file, a packet and a
+    proposal directory, so the second silently overwrote the first. A `-1`
+    suffix would fix the collision and break the ordering, because `Z-1.md`
+    sorts before `Z.md` and "newest packet" is chosen by name in several places.
+    """
+    moment = time.time() if moment is None else moment
+    return time.strftime("%Y%m%dT%H%M%S", time.gmtime(moment)) + f"{moment % 1:.6f}"[2:] + "Z"
+
+
+def _unused_run_id(root: Path) -> str:
+    """Belt and braces: step forward until the id is genuinely free."""
+    moment = time.time()
+    candidate = new_run_id(moment)
+    while (root / RUNS_DIR / f"{candidate}.json").exists():
+        moment += 1e-6
+        candidate = new_run_id(moment)
+    return candidate
 
 
 def write_run(
@@ -53,7 +69,7 @@ def write_run(
 ) -> StageResult:
     """Write the three staging outputs for one scan (AC-027)."""
     root = Path(output_root)
-    run_id = run_id or new_run_id()
+    run_id = run_id or _unused_run_id(root)
     local_only = bool(redactor.local_only) if redactor is not None else False
     # Derived here, not taken on trust: REQ-018 requires the warning to reach
     # run metadata and the packet, and a caller that forgets to pass it is
@@ -67,11 +83,11 @@ def write_run(
     proposal_paths = []
     for item in staged:
         path = resolve_within(root, f"{PROPOSALS_DIR}/{run_id}/{item.id}.json")
-        _write_json(path, _proposal_payload(item, run_id, local_only, machine))
+        write_json(path, _proposal_payload(item, run_id, local_only, machine))
         proposal_paths.append(path)
 
     run_path = resolve_within(root, f"{RUNS_DIR}/{run_id}.json")
-    _write_json(
+    write_json(
         run_path,
         {
             "schema_version": SCHEMA_VERSION,
@@ -98,7 +114,7 @@ def write_run(
     )
 
     packet_path = resolve_within(root, f"{PACKETS_DIR}/{run_id}.md")
-    _write_text(packet_path, render_packet(staged, run_id, counts, local_only, warnings, machine))
+    write_text(packet_path, render_packet(staged, run_id, counts, local_only, warnings, machine))
 
     return StageResult(
         run_id=run_id, run_path=run_path, packet_path=packet_path, proposal_paths=proposal_paths
@@ -209,27 +225,3 @@ def _render_counts(counts: ParseCounts) -> list[str]:
             lines.append(f"- {label}: {value}")
     lines.append("")
     return lines
-
-
-def resolve_within(root: Path, relative: str) -> Path:
-    """Every write in this package goes through here (AC-001, AC-052).
-
-    Shared with `writer.py` deliberately: two implementations of one safety
-    guarantee is one implementation too many, and this is the guarantee the
-    project's headline promise rests on.
-    """
-    base = root.expanduser().resolve()
-    candidate = (base / relative).resolve()
-    if candidate != base and base not in candidate.parents:
-        raise OutputRootEscape(f"refusing to write outside the output root: {candidate}")
-    return candidate
-
-
-def _write_json(path: Path, payload: dict) -> None:
-    _write_text(path, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
-
-
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write(text)

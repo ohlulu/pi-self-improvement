@@ -20,7 +20,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from .redact import Redactor
-from .stage import OutputRootEscape, resolve_within
+from .safeio import OutputRootEscape, read_json, resolve_within, write_json, write_text
 from .state import SCHEMA_VERSION
 
 QUEUE_DIR = "queue"
@@ -181,7 +181,7 @@ def write_triage(
         decision_paths.append(path)
 
     queue_path = resolve_within(root, QUEUE_FILE)
-    _write_text(queue_path, render_queue(triage, moment))
+    write_text(queue_path, render_queue(triage, moment))
 
     return WriteResult(
         queue_path=queue_path,
@@ -197,7 +197,7 @@ def _append_decision(path: Path, entry: TriageEntry, machine: str | None, moment
     Appending rather than replacing is what lets two machines contribute to the
     same incident without either overwriting the other's verdict.
     """
-    payload = _read_json(path) or {
+    payload = _existing_decision(path) or {
         "schema_version": SCHEMA_VERSION,
         "id": entry.logical_id,
         "key": entry.key,
@@ -213,7 +213,14 @@ def _append_decision(path: Path, entry: TriageEntry, machine: str | None, moment
             "at": moment,
         }
     )
-    _write_text(path, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    write_json(path, payload)
+
+
+def _existing_decision(path: Path):
+    payload = read_json(path)
+    if isinstance(payload, dict) and isinstance(payload.get("entries"), list):
+        return payload
+    return None
 
 
 def render_queue(triage: Triage, moment: str) -> str:
@@ -247,19 +254,8 @@ def render_queue(triage: Triage, moment: str) -> str:
     return "\n".join(lines)
 
 
-def _read_json(path: Path):
-    try:
-        with open(path, encoding="utf-8") as handle:
-            payload = json.load(handle)
-    except (OSError, json.JSONDecodeError):
-        return None
-    return payload if isinstance(payload, dict) and isinstance(payload.get("entries"), list) else None
 
 
-def _write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write(text)
 
 
 __all__ = [

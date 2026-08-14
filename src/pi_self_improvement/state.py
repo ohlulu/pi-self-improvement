@@ -17,7 +17,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .route import Proposal
+from .redact import Redactor
+from .route import Proposal, summarize
+from .safeio import read_json as _safe_read_json
+from .safeio import resolve_within, write_json
 
 SCHEMA_VERSION = 1
 
@@ -32,6 +35,11 @@ _PERMANENT = (WONTFIX, IGNORED)
 
 STATE_FILE = "state.json"
 RESOLUTIONS_FILE = "resolutions.json"
+
+#: Summaries are rebuilt when a watermark trims evidence. Default mode always:
+#: like a target, a stored summary must not change shape because a run used
+#: `--full`.
+_SUMMARY_REDACTOR = Redactor()
 
 
 def proposal_id(proposal: Proposal) -> str:
@@ -59,6 +67,10 @@ def parse_timestamp(value: str | None) -> datetime | None:
     except ValueError:
         return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+class DecisionsFileError(ValueError):
+    """A `--resolve-from` file that cannot be read as written."""
 
 
 @dataclass
@@ -137,7 +149,7 @@ class Resolutions:
 
     @classmethod
     def load(cls, path: Path) -> Resolutions:
-        payload = _read_json(path)
+        payload = _safe_read_json(path) or {}
         raw = payload.get("resolutions", {}) if isinstance(payload, dict) else {}
         return cls({key: Resolution.from_dict(value) for key, value in raw.items()})
 
@@ -148,7 +160,7 @@ class Resolutions:
         }
 
     def save(self, path: Path) -> None:
-        _write_json(path, self.to_dict())
+        write_json(path, self.to_dict())
 
     def get(self, key: str) -> Resolution | None:
         return self.entries.get(key)
@@ -173,6 +185,14 @@ class Resolutions:
         """
         if decision not in DECISIONS:
             raise ValueError(f"unknown decision: {decision!r}")
+        # An unparseable watermark leaves the registry saying `fixed` while the
+        # filter can never suppress or regress anything — the target silently
+        # behaves as if it was never resolved at all.
+        if resolved_at and parse_timestamp(resolved_at) is None:
+            raise ValueError(
+                f"resolved_at {resolved_at!r} is not an ISO-8601 timestamp "
+                "(for example 2026-03-01T00:00:00Z)"
+            )
         entry = Resolution(
             key=key,
             decision=decision,
@@ -196,7 +216,7 @@ class Resolutions:
         the reviewer has not decided, so importing them would silently suppress
         a proposal that is still under discussion.
         """
-        payload = source if isinstance(source, (dict, list)) else _read_json(Path(source))
+        payload = source if isinstance(source, (dict, list)) else _load_decisions(Path(source))
         rows = payload.get("decisions", []) if isinstance(payload, dict) else payload
         imported = []
         for row in rows if isinstance(rows, list) else []:
@@ -242,12 +262,12 @@ class Resolutions:
         ]
         if not fresh:
             return None, False
-        survivor = Proposal(
-            route=proposal.route,
-            target=proposal.target,
-            signals=fresh,
-            summary=proposal.summary,
-        )
+        survivor = Proposal(route=proposal.route, target=proposal.target, signals=fresh)
+        # The summary must be recomputed, not inherited. Carrying it over makes a
+        # regression with one new failure announce "failed 6 time(s) across 6
+        # session(s)", so the reviewer reads a fix that worked as one that did
+        # nothing.
+        survivor.summary = summarize(survivor, _SUMMARY_REDACTOR)
         return survivor, True
 
 
@@ -279,7 +299,7 @@ class State:
 
     @classmethod
     def load(cls, path: Path) -> State:
-        payload = _read_json(path)
+        payload = _safe_read_json(path) or {}
         if not isinstance(payload, dict):
             return cls()
         return cls(seen=payload.get("seen"), recurrence=payload.get("recurrence"))
@@ -292,7 +312,7 @@ class State:
         }
 
     def save(self, path: Path) -> None:
-        _write_json(path, self.to_dict())
+        write_json(path, self.to_dict())
 
     def has_seen(self, identifier: str) -> bool:
         return identifier in self.seen
@@ -381,6 +401,21 @@ def run_pipeline(
     return result
 
 
+def _load_decisions(path: Path):
+    """Fail loudly on a decisions file that is missing or unreadable.
+
+    Treating it as empty makes `--resolve-from typo.json` exit 0 reporting
+    "imported 0 target(s)", which reads to a script exactly like a file that
+    genuinely had nothing in it.
+    """
+    if not path.is_file():
+        raise DecisionsFileError(f"decisions file not found: {path}")
+    payload = _safe_read_json(path)
+    if payload is None:
+        raise DecisionsFileError(f"decisions file is not valid JSON: {path}")
+    return payload
+
+
 def self_check(counts) -> list[str]:
     """Warnings a scan must surface loudly (REQ-018).
 
@@ -399,20 +434,3 @@ def self_check(counts) -> list[str]:
     if counts.non_canonical_files:
         warnings.append(f"{counts.non_canonical_files} transcript(s) use a non-canonical schema")
     return warnings
-
-
-def _read_json(path: Path) -> dict:
-    try:
-        with open(path, encoding="utf-8") as handle:
-            return json.load(handle)
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def _write_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
-        handle.write("\n")
-    tmp.replace(path)

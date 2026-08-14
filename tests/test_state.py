@@ -485,8 +485,24 @@ class TestDecisionsImport(unittest.TestCase):
 
         self.assertEqual(state.Resolutions().import_decisions(path), [])
 
-    def test_a_missing_file_imports_nothing(self):
-        self.assertEqual(state.Resolutions().import_decisions(self.root / "nope.json"), [])
+    def test_a_missing_file_is_an_error_not_a_silent_no_op(self):
+        """`--resolve-from typo.json` used to exit 0 saying "imported 0 target(s)",
+        which a script cannot tell apart from a file that really was empty."""
+        with self.assertRaises(state.DecisionsFileError):
+            state.Resolutions().import_decisions(self.root / "nope.json")
+
+    def test_a_malformed_file_is_an_error(self):
+        path = self.root / "decisions.json"
+        path.write_text("{not json", encoding="utf-8")
+
+        with self.assertRaises(state.DecisionsFileError):
+            state.Resolutions().import_decisions(path)
+
+    def test_an_empty_decisions_list_imports_nothing_without_erroring(self):
+        path = self.root / "decisions.json"
+        path.write_text('{"decisions": []}', encoding="utf-8")
+
+        self.assertEqual(state.Resolutions().import_decisions(path), [])
 
 
 class TestSelfCheck(unittest.TestCase):
