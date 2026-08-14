@@ -15,8 +15,8 @@ read_when:
 
 ## Phase 2: Parse (REQ-002, REQ-005 slice)
 
-- [ ] T004 [REQ-002,REQ-003,REQ-005] Write failing tests for `parse.py`: session discovery windowing (`--since-days` excludes out-of-window history regardless of state presence, `--all` includes it; AC-002, AC-038), `--max-sessions` counts root sessions only while subagent sessions ride along (AC-003, AC-039), four-role mapping including `bashExecution` (AC-040), line-order traversal with no `parentId` walk, toolCall/toolResult pairing by `toolCallId` with dangling-call counting (AC-041), cwd/timestamps, session `origin`. Verify: `python3 -m unittest tests.test_parse` → RED
-- [ ] T005 [REQ-002,REQ-003,REQ-005] Implement `parse.py`. Verify: `python3 -m unittest tests.test_parse` → GREEN
+- [x] T004 [REQ-002,REQ-003,REQ-005] Write failing tests for `parse.py`: session discovery windowing (`--since-days` excludes out-of-window history regardless of state presence, `--all` includes it; AC-002, AC-038), `--max-sessions` counts root sessions only while subagent sessions ride along (AC-003, AC-039), four-role mapping including `bashExecution` (AC-040), line-order traversal with no `parentId` walk, toolCall/toolResult pairing by `toolCallId` with dangling-call counting (AC-041), cwd/timestamps, session `origin`. Verify: `python3 -m unittest tests.test_parse` → RED
+- [x] T005 [REQ-002,REQ-003,REQ-005] Implement `parse.py`. Verify: `python3 -m unittest tests.test_parse` → GREEN
 
 ## Phase 3: Redaction (REQ-004 slice)
 
