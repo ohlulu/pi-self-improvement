@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from pi_self_improvement import detect, parse
 from pi_self_improvement.model import KIND_BASH_EXECUTION, SessionSummary, ToolCall
@@ -129,6 +130,81 @@ class TestFailureDetection(DetectTestCase):
         summary = session(call(command="demo-cli sync", result="x" * 5000, is_error=True))
 
         self.assertLessEqual(len(self.only(summary, detect.FAILURE)[0].evidence.excerpt), 360)
+
+
+class TestStatusAsAnswer(DetectTestCase):
+    """A non-zero status from a search program is its answer, not a failure.
+
+    Found by routing the real corpus: `grep` produced 388 backlog entries across
+    229 sessions, essentially all "exit 1, no output". AC-014 already excludes an
+    empty search result from silent-empty; the same reasoning applies when the
+    shell reports the emptiness as a non-zero exit.
+    """
+
+    def test_grep_finding_nothing_is_not_a_failure(self):
+        summary = session(
+            call(
+                command="grep -r needle src",
+                result="(no output)\nCommand exited with code 1",
+                is_error=True,
+                exit_code=1,
+            )
+        )
+
+        self.assertEqual(self.only(summary, detect.FAILURE), [])
+
+    def test_the_same_shape_from_a_normal_program_is_still_a_failure(self):
+        summary = session(
+            call(
+                command="make build",
+                result="(no output)\nCommand exited with code 1",
+                is_error=True,
+                exit_code=1,
+            )
+        )
+
+        self.assertEqual(len(self.only(summary, detect.FAILURE)), 1)
+
+    def test_grep_with_real_error_output_is_still_a_failure(self):
+        summary = session(
+            call(
+                command="grep -r needle /nope",
+                result="grep: /nope: No such file or directory\nCommand exited with code 1",
+                is_error=True,
+                exit_code=1,
+            )
+        )
+
+        self.assertEqual(len(self.only(summary, detect.FAILURE)), 1)
+
+    def test_a_worse_exit_code_from_a_search_tool_is_a_failure(self):
+        summary = session(
+            call(command="grep -r needle src", result="(no output)", is_error=True, exit_code=2)
+        )
+
+        self.assertEqual(len(self.only(summary, detect.FAILURE)), 1)
+
+    def test_the_exit_code_is_read_from_the_result_text(self):
+        """Pi only sometimes repeats the status in `details`."""
+        from pi_self_improvement import parse as parse_module
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.jsonl"
+            support.write_jsonl(
+                path,
+                [
+                    support.session_record("x"),
+                    support.tool_call_record("c1", "bash", {"command": "grep needle src"}),
+                    support.tool_result_record(
+                        "c1", "bash", "(no output)\nCommand exited with code 1", is_error=True
+                    ),
+                ],
+            )
+            summary = parse_module.parse_transcript(path)
+
+        self.assertEqual(summary.tool_calls[0].exit_code, 1)
 
 
 class TestBashExecutionFailures(DetectTestCase):

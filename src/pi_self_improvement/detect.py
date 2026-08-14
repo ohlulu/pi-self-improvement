@@ -105,6 +105,16 @@ _ACKNOWLEDGEMENTS = tuple(
 #: AC-012: three different flag combinations on one subcommand.
 _RETRY_COMBINATIONS = 3
 
+#: Programs whose exit status is an answer rather than an error: `grep` exits 1
+#: for "no match", `test` for "false", `diff` for "they differ". AC-014 already
+#: says an empty search result is not friction; the same is true when the shell
+#: reports it as a non-zero status.
+_STATUS_AS_ANSWER = frozenset({"grep", "rg", "ag", "ack", "find", "fd", "test", "diff", "cmp", "["})
+
+#: Pi's placeholder for a command that printed nothing, plus the status line it
+#: appends. Neither is output the user wrote or a program produced.
+_NO_OUTPUT = re.compile(r"\(no output\)|Command exited with code \d+", re.IGNORECASE)
+
 #: DEC-009 scaffold markers. Deliberately only two.
 #:
 #: Pi expresses injected context as its own record type, so the strongest filter
@@ -519,7 +529,24 @@ def _detect_retries(
     return signals
 
 
+def _is_answer_not_failure(call: ToolCall) -> bool:
+    """True when a non-zero status is the program's answer, not a problem.
+
+    Measured on the real corpus: `grep` alone accounted for 388 backlog entries
+    across 229 sessions, essentially all of them "exit 1, no output" — a search
+    that found nothing. Filing that as friction buries the real entries.
+    """
+    if call.exit_code != 1:
+        return False
+    executable = executable_of(call.command) or call.tool_name
+    if executable not in _STATUS_AS_ANSWER:
+        return False
+    return not _NO_OUTPUT.sub("", call.result_text).strip()
+
+
 def _is_failure(call: ToolCall) -> bool:
+    if _is_answer_not_failure(call):
+        return False
     if call.is_error is True:
         return True
     if call.is_error is False:

@@ -40,6 +40,11 @@ DEFAULT_SESSIONS_ROOT = "~/.pi/agent/sessions"
 KNOWN_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 
 _RUN_DIR = re.compile(r"run-\d+\Z")
+
+#: Pi appends the exit status to a bash result's text and only sometimes repeats
+#: it in `details`. Reading it here means detectors get the status for every bash
+#: call rather than the ~8% that carry the structured field.
+_EXIT_IN_TEXT = re.compile(r"Command exited with code (\d+)\s*\Z")
 _DAY = 86400.0
 _ABORTED_STOP_REASONS = frozenset({"aborted", "error"})
 
@@ -326,6 +331,10 @@ def _absorb_message(
                 call.command = details["command"]
             if call.exit_code is None and isinstance(details.get("exitCode"), int):
                 call.exit_code = details["exitCode"]
+        if call.exit_code is None:
+            found = _EXIT_IN_TEXT.search(call.result_text.rstrip())
+            if found:
+                call.exit_code = int(found.group(1))
         return
 
     if role == "bashExecution":
