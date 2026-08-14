@@ -323,6 +323,70 @@ class TestCanaryScan(unittest.TestCase):
         self.assertEqual(redact.scan_for_canaries(self.root / "nope", ["x"]), [])
 
 
+class TestHomeShortening(unittest.TestCase):
+    """`~` substitution must respect path component boundaries.
+
+    A bare startswith turns `/Users/anna/proj` into `~a/proj` when HOME is
+    `/Users/ann`, which is unreadable and — because memory_context targets are
+    stored keys — corrupts proposal identity.
+    """
+
+    def test_a_sibling_directory_sharing_a_prefix_is_untouched(self):
+        self.assertEqual(
+            redact.Redactor(home="/Users/ann").path("/Users/anna/proj"), "/Users/anna/proj"
+        )
+
+    def test_the_real_home_is_still_shortened(self):
+        self.assertEqual(redact.Redactor(home="/Users/ann").path("/Users/ann/proj"), "~/proj")
+
+    def test_the_home_directory_itself_is_shortened(self):
+        self.assertEqual(redact.Redactor(home="/Users/ann").path("/Users/ann"), "~")
+
+    def test_route_targets_use_the_same_rule(self):
+        from pi_self_improvement import route
+
+        self.assertEqual(
+            route.repository_root("/Users/anna/proj", home="/Users/ann"), "/Users/anna/proj"
+        )
+
+
+class TestModelSuppliedStrings(unittest.TestCase):
+    """Triage arrives from a language model, so its fields are untrusted input."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name) / "out"
+        self.addCleanup(self._tmp.cleanup)
+
+    def test_a_secret_in_the_proposal_id_never_reaches_disk(self):
+        from pi_self_improvement import writer
+
+        secret = CANARIES["github_token"]
+        writer.write_triage(
+            self.root,
+            writer.parse_triage(
+                {"entries": [{"id": secret, "key": "tool:a", "verdict": "act", "reason": "x"}]}
+            ),
+        )
+
+        hits = redact.scan_for_canaries(self.root, [secret])
+
+        self.assertEqual(hits, [])
+
+    def test_a_secret_in_the_key_never_reaches_disk(self):
+        from pi_self_improvement import writer
+
+        secret = CANARIES["github_token"]
+        writer.write_triage(
+            self.root,
+            writer.parse_triage(
+                {"entries": [{"id": "p1", "key": f"tool:{secret}", "verdict": "act", "reason": "x"}]}
+            ),
+        )
+
+        self.assertEqual(redact.scan_for_canaries(self.root, [secret]), [])
+
+
 class TestWrittenOutputRoot(unittest.TestCase):
     """AC-042 and AC-006 over a real scan — the halves deferred from T007/T018.
 

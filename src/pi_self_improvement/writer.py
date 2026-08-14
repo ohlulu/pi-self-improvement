@@ -136,7 +136,8 @@ def parse_triage(source) -> Triage:
                 verdict=verdict,
                 reason=_REDACTOR.text(str(row.get("reason") or "")),
                 suggested_fix=_REDACTOR.text(str(row.get("suggested_fix") or "")),
-                proposal_id=str(row.get("id") or ""),
+                # Model-controlled and written straight into a decision file.
+                proposal_id=_REDACTOR.text(str(row.get("id") or "")),
             )
         )
     return Triage(entries=entries, notes=_REDACTOR.text(str(payload.get("notes") or "")))

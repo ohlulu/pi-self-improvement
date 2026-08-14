@@ -138,6 +138,21 @@ _PATTERNS: list[tuple[re.Pattern, object]] = [
 ]
 
 
+def shorten_home(path: str, home: str | None) -> str:
+    """Replace a leading home directory with `~`, on component boundaries only.
+
+    A bare startswith turns `/Users/anna/proj` into `~a/proj` when HOME is
+    `/Users/ann`. That is unreadable in a packet and, worse, it corrupts
+    memory_context target identity, which is a stored key.
+    """
+    if not home or not path.startswith(home):
+        return path
+    rest = path[len(home) :]
+    if rest and not rest.startswith(("/", "\\")):
+        return path
+    return "~" + rest
+
+
 class Redactor:
     """Masks secret shapes and shortens excerpts.
 
@@ -253,8 +268,8 @@ class Redactor:
         if value is None:
             return ""
         text = value if isinstance(value, str) else str(value)
-        if not self._full and self._home and text.startswith(self._home):
-            text = "~" + text[len(self._home) :]
+        if not self._full:
+            text = shorten_home(text, self._home)
         return self.text(text)
 
 

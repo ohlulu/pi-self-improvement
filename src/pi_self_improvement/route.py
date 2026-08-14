@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .detect import CORRECTION, FAILURE, HANG, RETRY, SILENT_EMPTY, SKILL, Signal
-from .redact import Redactor
+from .redact import Redactor, shorten_home
 
 ROUTE_TOOL = "tool"
 ROUTE_SKILL = "skill_improvement"
@@ -163,9 +163,7 @@ def _worktree_root(marker: Path) -> Path | None:
 
 def _shorten_home(path: str, home: str | None) -> str:
     base = str(home) if home is not None else str(Path.home())
-    if base and path.startswith(base):
-        return "~" + path[len(base) :]
-    return path
+    return shorten_home(path, base)
 
 
 def build_proposals(
