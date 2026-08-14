@@ -5,6 +5,8 @@ __pycache__/
 venv/
 *.log
 .pi-self-improvement/
+.pi/subagents/
+.pi/settings.json
 private/
 *.local.json
 build/
