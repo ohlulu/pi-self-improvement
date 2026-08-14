@@ -365,6 +365,85 @@ class TestSilentEmpty(DetectTestCase):
         self.assertEqual(len(self.only(summary, detect.SILENT_EMPTY)), 1)
 
 
+class TestSkillInvocation(DetectTestCase):
+    """REQ-009 / DEC-006: the read-path heuristic is the specification default."""
+
+    def test_a_skill_md_read_names_the_skill_after_its_directory(self):
+        """AC-015, using the path the requirement names literally."""
+        summary = session(
+            call("read", arguments={"path": "~/.pi/agent/skills/commit/SKILL.md"}, result="---", is_error=False)
+        )
+
+        signals = self.only(summary, detect.SKILL)
+
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0].subject, "commit")
+
+    def test_an_absolute_path_works_the_same(self):
+        summary = session(
+            call("read", arguments={"path": "/tmp/pi-fixtures/skills/demo-skill/SKILL.md"}, is_error=False)
+        )
+
+        self.assertEqual(self.only(summary, detect.SKILL)[0].subject, "demo-skill")
+
+    def test_a_failed_read_loaded_nothing(self):
+        summary = session(
+            call(
+                "read",
+                arguments={"path": "/tmp/skills/gone/SKILL.md"},
+                result="No such file or directory",
+                is_error=True,
+            )
+        )
+
+        self.assertEqual(self.only(summary, detect.SKILL), [])
+
+    def test_an_unrelated_read_is_not_a_skill(self):
+        summary = session(call("read", arguments={"path": "/tmp/notes/README.md"}, is_error=False))
+
+        self.assertEqual(self.only(summary, detect.SKILL), [])
+
+    def test_a_file_merely_containing_the_word_skill_is_not_one(self):
+        summary = session(call("read", arguments={"path": "/tmp/docs/SKILL.md.bak"}, is_error=False))
+
+        self.assertEqual(self.only(summary, detect.SKILL), [])
+
+    def test_custom_entries_are_ignored_by_default(self):
+        """AC-044: opt-in, because the entry comes from a personal extension."""
+        summary = parse.parse_transcript(
+            support.FIXTURE_SESSIONS
+            / "--tmp-pi-fixtures-alpha--"
+            / "2026-01-05T09-00-00-000Z_00000000-0000-7000-8000-00000000a001.jsonl"
+        )
+
+        names = [signal.subject for signal in self.only(summary, detect.SKILL)]
+
+        self.assertEqual(names, ["demo-skill"], "the custom entry must not double-count")
+
+    def test_custom_entries_count_once_configured(self):
+        """AC-044, second half."""
+        summary = parse.parse_transcript(
+            support.FIXTURE_SESSIONS
+            / "--tmp-pi-fixtures-alpha--"
+            / "2026-01-05T09-00-00-000Z_00000000-0000-7000-8000-00000000a001.jsonl"
+        )
+        config = detect.DetectConfig(skill_loaded_custom_types=("context:skill_loaded",))
+
+        names = [signal.subject for signal in self.only(summary, detect.SKILL, config)]
+
+        self.assertEqual(names, ["demo-skill", "demo-skill"])
+
+    def test_the_evidence_points_at_the_read(self):
+        summary = session(
+            call("read", arguments={"path": "/tmp/skills/demo-skill/SKILL.md"}, line=12, is_error=False)
+        )
+
+        evidence = self.only(summary, detect.SKILL)[0].evidence
+
+        self.assertEqual(evidence.line, 12)
+        self.assertEqual(evidence.source, detect.SKILL)
+
+
 class TestExecutableAttribution(DetectTestCase):
     """REQ-007: which CLI a piece of tool-route evidence is about."""
 

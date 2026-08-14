@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from . import cues
 from .model import KIND_BASH_EXECUTION, Evidence, SessionSummary, ToolCall
 from .redact import Redactor
 
@@ -21,6 +22,13 @@ FAILURE = "failure"
 HANG = "hang"
 SILENT_EMPTY = "silent_empty"
 RETRY = "retry"
+SKILL = "skill"
+CORRECTION = "correction"
+
+#: DEC-006: a `read` whose path ends here loaded a skill. This is the spec
+#: default because it is pi core behaviour; the richer `context:skill_loaded`
+#: entry comes from a personal extension and is opt-in via config.
+SKILL_FILENAME = "SKILL.md"
 
 #: Tool names that run a shell command, so the executable rather than the tool is
 #: what evidence is about.
@@ -143,6 +151,11 @@ class DetectConfig:
     detect_silent_empty: bool = True
     silent_empty_fetch_verbs: tuple[str, ...] = DEFAULT_FETCH_VERBS
     silent_empty_ignore: tuple[str, ...] = DEFAULT_SILENT_EMPTY_IGNORE
+    #: Empty by default (DEC-006/AC-044): these entries come from personal
+    #: extensions, and a public default keyed on one would silently find nothing
+    #: on anyone else's machine.
+    skill_loaded_custom_types: tuple[str, ...] = ()
+    cue_packs: tuple[cues.CuePack, ...] = cues.BUILTIN_PACKS
 
 
 DEFAULT_CONFIG = DetectConfig()
@@ -246,7 +259,103 @@ def detect_session(
             troubled.add(id(call))
 
     signals.extend(_detect_retries(summary, redactor, config, troubled))
+    signals.extend(_detect_skills(summary, redactor, config))
+    signals.extend(_detect_corrections(summary, redactor, config))
     return signals
+
+
+def _detect_skills(
+    summary: SessionSummary, redactor: Redactor, config: DetectConfig
+) -> list[Signal]:
+    """REQ-009: a skill's instructions were loaded into this session."""
+    signals: list[Signal] = []
+    for call in summary.tool_calls:
+        if call.tool_name != "read" or call.is_error is True:
+            # A read that failed loaded nothing.
+            continue
+        path = call.arguments.get("path")
+        if not isinstance(path, str) or not path.endswith(SKILL_FILENAME):
+            continue
+        name = _skill_name_from(path)
+        if name:
+            signals.append(_context_signal(SKILL, name, summary, call.line, path, redactor))
+
+    wanted = set(config.skill_loaded_custom_types)
+    for entry in summary.custom_entries:
+        if entry.custom_type not in wanted:
+            continue
+        name = entry.data.get("name") or _skill_name_from(str(entry.data.get("path") or ""))
+        if name:
+            signals.append(
+                _context_signal(
+                    SKILL, str(name), summary, entry.line, str(entry.data.get("path") or name), redactor
+                )
+            )
+    return signals
+
+
+def _skill_name_from(path: str) -> str | None:
+    """`.../skills/commit/SKILL.md` names the skill `commit`."""
+    parts = [part for part in path.replace("\\", "/").split("/") if part]
+    if len(parts) < 2:
+        return None
+    return parts[-2]
+
+
+def _detect_corrections(
+    summary: SessionSummary, redactor: Redactor, config: DetectConfig
+) -> list[Signal]:
+    """REQ-010: the user telling the agent it got something wrong.
+
+    Only a message that follows an assistant turn can be a correction — there is
+    nothing to correct before the agent has answered (AC-016).
+    """
+    if not summary.assistant_turns or not config.cue_packs:
+        return []
+    first_answer = min(turn.line for turn in summary.assistant_turns)
+
+    signals: list[Signal] = []
+    for message in summary.user_messages:
+        if message.line <= first_answer:
+            continue
+        hit = cues.find_cue(message.text, config.cue_packs)
+        if hit is None:
+            continue
+        signals.append(
+            Signal(
+                kind=CORRECTION,
+                subject=summary.cwd or "<unknown>",
+                evidence=Evidence(
+                    source=CORRECTION,
+                    path=redactor.path(summary.path),
+                    line=message.line,
+                    excerpt=redactor.excerpt(message.text),
+                    timestamp=message.timestamp,
+                    session_id=summary.session_id,
+                    origin=summary.origin,
+                ),
+                detail={"pack": hit.pack, "cue": hit.cue, "strength": hit.strength, "cwd": summary.cwd},
+            )
+        )
+    return signals
+
+
+def _context_signal(
+    kind: str, subject: str, summary: SessionSummary, line: int, excerpt: str, redactor: Redactor
+) -> Signal:
+    return Signal(
+        kind=kind,
+        subject=subject,
+        evidence=Evidence(
+            source=kind,
+            path=redactor.path(summary.path),
+            line=line,
+            excerpt=redactor.path(excerpt),
+            session_id=summary.session_id,
+            origin=summary.origin,
+        ),
+        detail={"name": subject},
+    )
 
 
 def _detect_call(
