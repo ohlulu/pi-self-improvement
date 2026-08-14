@@ -42,6 +42,15 @@ _WRAPPERS = frozenset(
 #: Shell built-ins that are rarely the point of a command line.
 _SHELL_NOISE = frozenset({"cd", "export", "set", "source", ".", "unset", "pushd", "popd"})
 
+#: Data producers at the head of a pipeline. `printf x | demo-cli list` is about
+#: demo-cli, so attributing the failure to printf discards a tracked CLI.
+_PIPE_PRODUCERS = frozenset({"echo", "printf", "cat", "yes", "seq"})
+
+#: Skipped along with the wrapper itself: these options take a value, and the
+#: value is not the program. Without this, `env -u GH_TOKEN demo-cli` attributes
+#: the command to GH_TOKEN.
+_WRAPPER_VALUE_OPTIONS = frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"})
+
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _SEGMENT_SPLIT = re.compile(r"\s*(?:&&|\|\||;|\|)\s*")
 
@@ -202,7 +211,7 @@ def _analyze(command: str | None) -> tuple[str | None, str | None, tuple[str, ..
             continue
         if fallback is None:
             fallback = parsed
-        if parsed[0] not in _SHELL_NOISE:
+        if parsed[0] not in _SHELL_NOISE and parsed[0] not in _PIPE_PRODUCERS:
             return parsed
     return fallback if fallback is not None else (None, None, ())
 
@@ -213,8 +222,15 @@ def _analyze_segment(segment: str) -> tuple[str, str | None, tuple[str, ...]] | 
     settled = False
     flags: set[str] = set()
 
+    skip_next = False
     for token in segment.split():
         if executable is None:
+            if skip_next:
+                skip_next = False
+                continue
+            if token in _WRAPPER_VALUE_OPTIONS:
+                skip_next = True
+                continue
             if _ENV_ASSIGNMENT.match(token) or token.isdigit() or token.startswith("-"):
                 continue
             bare = token.rsplit("/", 1)[-1]
@@ -297,6 +313,10 @@ def _detect_skills(
     for call in summary.tool_calls:
         if call.tool_name != "read" or call.is_error is True:
             # A read that failed loaded nothing.
+            continue
+        if not call.matched:
+            # A dangling call never returned, so nothing was loaded and AC-041
+            # says it produces no evidence. It is already in the counts.
             continue
         path = call.arguments.get("path")
         if not isinstance(path, str) or not path.endswith(SKILL_FILENAME):

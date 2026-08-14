@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -770,3 +771,65 @@ class TestRetryShapes(DetectTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAttributionGuards(unittest.TestCase):
+    """Review findings: a pipeline head and a wrapper's option value were being
+    mistaken for the program, which discards tracked-CLI failures."""
+
+    def test_a_pipeline_head_producer_is_not_the_program(self):
+        self.assertEqual(detect.executable_of("printf x | demo-cli list"), "demo-cli")
+
+    def test_a_wrapper_option_value_is_not_the_program(self):
+        self.assertEqual(detect.executable_of("env -u GH_TOKEN demo-cli list"), "demo-cli")
+
+    def test_sudo_option_values_are_skipped_too(self):
+        self.assertEqual(detect.executable_of("sudo -u root demo-cli run"), "demo-cli")
+
+    def test_a_downstream_filter_is_still_attributed(self):
+        """`cat f | grep x` is about grep; there is no later segment to prefer."""
+        self.assertEqual(detect.executable_of("cat f | grep needle"), "grep")
+
+    def test_a_producer_alone_is_still_itself(self):
+        self.assertEqual(detect.executable_of("echo hello"), "echo")
+
+    def test_an_ordinary_command_is_unaffected(self):
+        self.assertEqual(detect.executable_of("demo-cli list --json"), "demo-cli")
+
+
+class TestDanglingCallsProduceNoEvidence(DetectTestCase):
+    """AC-041: a toolCall with no result is counted, never turned into evidence."""
+
+    def test_a_dangling_skill_read_is_not_a_skill_invocation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.jsonl"
+            support.write_jsonl(
+                path,
+                [
+                    support.session_record("x"),
+                    support.tool_call_record("c1", "read", {"path": "/tmp/skills/demo/SKILL.md"}),
+                ],
+            )
+            summary = parse.parse_transcript(path)
+
+        signals = detect.detect_session(summary, redactor=Redactor())
+
+        self.assertEqual(summary.counts.dangling_tool_calls, 1)
+        self.assertEqual([s for s in signals if s.kind == detect.SKILL], [])
+
+    def test_a_completed_skill_read_still_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "t.jsonl"
+            support.write_jsonl(
+                path,
+                [
+                    support.session_record("x"),
+                    support.tool_call_record("c1", "read", {"path": "/tmp/skills/demo/SKILL.md"}),
+                    support.tool_result_record("c1", "read", "# Demo skill"),
+                ],
+            )
+            summary = parse.parse_transcript(path)
+
+        signals = detect.detect_session(summary, redactor=Redactor())
+
+        self.assertEqual([s.subject for s in signals if s.kind == detect.SKILL], ["demo"])
