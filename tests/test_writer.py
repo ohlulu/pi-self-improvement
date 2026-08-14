@@ -159,6 +159,61 @@ class TestQueue(WriterTestCase):
         self.assertIn("mostly noise this week", self.queue_text())
 
 
+class TestQueueIsDerivedNotOverwritten(WriterTestCase):
+    """The queue is a view over the decision files, not a per-run snapshot.
+
+    Writing only this run's verdicts deleted whatever the human had not got to
+    yet: an empty packet, or one covering different targets, silently emptied
+    the working list.
+    """
+
+    def test_an_empty_triage_does_not_clear_the_queue(self):
+        self.write_triage(triage_payload(entry("tool:keep-me")))
+
+        self.write_triage(triage_payload(notes="empty packet"))
+
+        self.assertIn("tool:keep-me", self.queue_text())
+
+    def test_a_triage_about_other_targets_does_not_clear_the_queue(self):
+        self.write_triage(triage_payload(entry("tool:keep-me")))
+
+        self.write_triage(triage_payload(entry("tool:something-else")))
+
+        text = self.queue_text()
+        self.assertIn("tool:keep-me", text)
+        self.assertIn("tool:something-else", text)
+
+    def test_re_triaging_as_drop_removes_the_entry(self):
+        self.write_triage(triage_payload(entry("tool:noisy")))
+
+        self.write_triage(triage_payload(entry("tool:noisy", verdict="drop")))
+
+        self.assertNotIn("tool:noisy", self.queue_text())
+
+    def test_the_latest_verdict_wins(self):
+        self.write_triage(triage_payload(entry("tool:x", verdict="investigate")))
+
+        self.write_triage(triage_payload(entry("tool:x", verdict="act", reason="now clear")))
+
+        self.assertIn("now clear", self.queue_text())
+
+    def test_a_resolved_target_leaves_the_queue(self):
+        """Once resolved the miner stops staging it, so no later triage would
+        ever come along to clear the entry."""
+        self.write_triage(triage_payload(entry("tool:fixed-now")))
+
+        self.write_triage(triage_payload(), resolved_keys={"tool:fixed-now"})
+
+        self.assertNotIn("tool:fixed-now", self.queue_text())
+
+    def test_the_queue_count_reflects_everything_open(self):
+        self.write_triage(triage_payload(entry("tool:a")))
+
+        result = self.write_triage(triage_payload(entry("tool:b")))
+
+        self.assertEqual(result.queued, 2)
+
+
 class TestOutputRootConfinement(WriterTestCase):
     """AC-052."""
 

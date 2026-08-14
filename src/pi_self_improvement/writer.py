@@ -169,9 +169,20 @@ def _load_json(text: str) -> dict:
 
 
 def write_triage(
-    output_root, triage: Triage, *, machine: str | None = None, at: str | None = None
+    output_root,
+    triage: Triage,
+    *,
+    machine: str | None = None,
+    at: str | None = None,
+    resolved_keys=(),
 ) -> WriteResult:
-    """Write the queue and one decision file per logical incident (AC-052)."""
+    """Record decisions, then re-render the queue from them (AC-052).
+
+    The queue is a view, not a store. Writing only this run's verdicts to it
+    deleted whatever the human had not got to yet: an empty packet, or one
+    covering different targets, silently emptied the list. Deriving it from the
+    decision files means a run can only ever add information.
+    """
     root = Path(output_root)
     moment = at or datetime.now(timezone.utc).isoformat()
 
@@ -181,15 +192,50 @@ def write_triage(
         _append_decision(path, entry, machine, moment)
         decision_paths.append(path)
 
+    open_entries = _open_entries(root, set(resolved_keys))
     queue_path = resolve_within(root, QUEUE_FILE)
-    write_text(queue_path, render_queue(triage, moment))
+    write_text(queue_path, render_queue(open_entries, triage.notes, moment))
 
     return WriteResult(
         queue_path=queue_path,
         decision_paths=decision_paths,
-        queued=len(triage.queued),
+        queued=len(open_entries),
         dropped=sum(1 for entry in triage.entries if entry.verdict == DROP),
     )
+
+
+def _open_entries(root: Path, resolved_keys: set) -> list[TriageEntry]:
+    """Every incident whose latest verdict is still actionable.
+
+    A resolved target leaves the queue here rather than waiting to be dropped by
+    a later triage. It will never appear in one: once resolved, the miner stops
+    staging it, so nothing would ever come along to clear the entry.
+    """
+    directory = root / DECISIONS_DIR
+    if not directory.is_dir():
+        return []
+
+    entries = []
+    for path in sorted(directory.glob("*.json")):
+        payload = _existing_decision(path)
+        if not payload or not payload["entries"]:
+            continue
+        key = payload.get("key", "")
+        if key in resolved_keys:
+            continue
+        latest = payload["entries"][-1]
+        if latest.get("verdict") not in QUEUED:
+            continue
+        entries.append(
+            TriageEntry(
+                key=key,
+                verdict=latest.get("verdict", INVESTIGATE),
+                reason=latest.get("reason", ""),
+                suggested_fix=latest.get("suggested_fix", ""),
+                proposal_id=latest.get("proposal_id", ""),
+            )
+        )
+    return entries
 
 
 def _append_decision(path: Path, entry: TriageEntry, machine: str | None, moment: str) -> None:
@@ -224,8 +270,8 @@ def _existing_decision(path: Path):
     return None
 
 
-def render_queue(triage: Triage, moment: str) -> str:
-    queued = triage.queued
+def render_queue(queued, notes: str, moment: str) -> str:
+    queued = list(queued)
     lines = [
         "# Fix queue",
         "",
@@ -235,8 +281,8 @@ def render_queue(triage: Triage, moment: str) -> str:
         "automatically; load the `learn-loop` skill to work through them.",
         "",
     ]
-    if triage.notes:
-        lines += [f"> {triage.notes}", ""]
+    if notes:
+        lines += [f"> {notes}", ""]
     if not queued:
         lines += ["Nothing to act on.", ""]
         return "\n".join(lines)

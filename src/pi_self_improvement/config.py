@@ -25,6 +25,7 @@ CONFIG_FILE = "config.json"
 
 #: Keys accepted in config.json, grouped by the shape each one must have.
 _LIST_KEYS = (
+    "extra_session_roots",
     "tracked_clis",
     "tracked_cli_suffix",
     "extra_scaffold_markers",
@@ -49,6 +50,16 @@ class Config:
     detect: DetectConfig = field(default_factory=DetectConfig)
     route: RouteConfig = field(default_factory=RouteConfig)
     extra_redaction_patterns: tuple[str, ...] = ()
+    #: REQ-002: scanned in addition to the default pi sessions root, never
+    #: instead of it.
+    extra_session_roots: tuple[str, ...] = ()
+
+    def session_roots(self, home=None) -> list:
+        from .parse import default_sessions_root
+
+        roots = [default_sessions_root(home)]
+        roots.extend(Path(root).expanduser() for root in self.extra_session_roots)
+        return roots
 
     def redactor(self, *, full: bool = False, home=None) -> Redactor:
         return Redactor(full=full, extra_patterns=self.extra_redaction_patterns, home=home)
@@ -110,6 +121,7 @@ class Config:
             detect=detect,
             route=route,
             extra_redaction_patterns=_strings(payload, "extra_redaction_patterns", ()),
+            extra_session_roots=_strings(payload, "extra_session_roots", ()),
         )
 
 

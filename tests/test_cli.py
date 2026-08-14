@@ -315,3 +315,73 @@ class TestConfigErrors(CliTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDryRunAppliesToEveryFlow(CliTestCase):
+    """REQ-016 scopes dry-run to the program, not just the scan."""
+
+    def test_a_dry_run_resolve_writes_nothing(self):
+        before = self.snapshot()
+
+        self.run_cli("--dry-run", "--resolve", "tool:x", "--decision", "fixed",
+                     expect=cli.EXIT_ERROR)
+
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse(self.output_root.exists())
+
+    def test_a_dry_run_write_queue_writes_nothing(self):
+        path = self.home / "triage.json"
+        path.write_text(json.dumps({"entries": []}), encoding="utf-8")
+        before = self.snapshot()
+
+        self.run_cli("--dry-run", "--write-queue", str(path), expect=cli.EXIT_ERROR)
+
+        self.assertEqual(self.snapshot(), before)
+
+    def test_a_dry_run_listing_is_allowed_because_it_writes_nothing(self):
+        self.run_cli("--dry-run", "--list-resolutions")
+
+    def test_the_refusal_names_the_conflicting_flag(self):
+        _, stderr = self.run_cli("--dry-run", "--resolve", "tool:x", "--decision", "fixed",
+                                 expect=cli.EXIT_ERROR)
+
+        self.assertIn("--dry-run", stderr)
+
+
+class TestExtraSessionRoots(CliTestCase):
+    """REQ-002: config roots are scanned in addition to the default."""
+
+    def test_a_configured_root_is_scanned(self):
+        extra = self.home / "elsewhere"
+        shutil.copytree(FIXTURES, extra)
+        for path in self.sessions.rglob("*.jsonl"):
+            path.unlink()
+        config = self.home / "config.json"
+        config.write_text(json.dumps({"extra_session_roots": [str(extra)]}), encoding="utf-8")
+
+        stdout, _ = self.run_cli("--config", str(config))
+
+        self.assertNotIn("from 0 transcript(s)", stdout)
+        self.assertTrue(self.proposals())
+
+    def test_the_default_root_is_still_scanned(self):
+        extra = self.home / "empty-elsewhere"
+        extra.mkdir()
+        config = self.home / "config.json"
+        config.write_text(json.dumps({"extra_session_roots": [str(extra)]}), encoding="utf-8")
+
+        stdout, _ = self.run_cli("--config", str(config))
+
+        self.assertNotIn("from 0 transcript(s)", stdout)
+
+    def test_an_invalid_resolved_at_is_refused(self):
+        _, stderr = self.run_cli("--resolve", "tool:x", "--decision", "fixed",
+                                 "--resolved-at", "not-a-time", expect=cli.EXIT_ERROR)
+
+        self.assertIn("ISO-8601", stderr)
+
+    def test_a_missing_decisions_file_is_refused(self):
+        _, stderr = self.run_cli("--resolve-from", str(self.home / "nope.json"),
+                                 expect=cli.EXIT_ERROR)
+
+        self.assertIn("not found", stderr)

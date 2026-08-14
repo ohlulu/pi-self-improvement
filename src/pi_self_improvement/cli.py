@@ -80,11 +80,29 @@ def main(argv=None, *, stdout=None, stderr=None) -> int:
     return _run_scan(args, config, out, err)
 
 
+def _refuse_dry_run(args, err, what: str) -> bool:
+    """REQ-016 scopes dry-run to the whole program, not just the scan.
+
+    Silently writing anyway would be worse than refusing: someone who adds
+    --dry-run to a command is asking for nothing to change.
+    """
+    if not args.dry_run:
+        return False
+    print(f"error: --dry-run cannot be combined with {what}", file=err)
+    return True
+
+
 def _run_write_queue(args, out, err) -> int:
     """The only path by which unattended triage reaches disk (ADR-0006)."""
+    if _refuse_dry_run(args, err, "--write-queue"):
+        return EXIT_ERROR
     try:
         triage = writer.parse_triage(args.write_queue)
-        result = writer.write_triage(_output_root(args), triage, machine=args.machine)
+        root = _output_root(args)
+        resolved = state.Resolutions.load(root / state.RESOLUTIONS_FILE)
+        result = writer.write_triage(
+            root, triage, machine=args.machine, resolved_keys=set(resolved.entries)
+        )
     except (writer.TriageError, writer.OutputRootEscape) as error:
         print(f"error: {error}", file=err)
         return EXIT_ERROR
@@ -108,7 +126,7 @@ def _run_scan(args, config: Config, out, err) -> int:
     redactor = config.redactor(full=args.full, home=args.home)
 
     discovered = parse.discover_transcripts(
-        [parse.default_sessions_root(args.home)],
+        config.session_roots(args.home),
         since_days=None if args.scan_all else args.since_days,
         include_all=args.scan_all,
         max_sessions=args.max_sessions,
@@ -171,6 +189,8 @@ def _summary_line(result, counts, *, dry_run: bool) -> str:
 
 
 def _run_resolutions(args, out, err) -> int:
+    if not args.list_resolutions and _refuse_dry_run(args, err, "a resolution change"):
+        return EXIT_ERROR
     root = _output_root(args)
     path = root / state.RESOLUTIONS_FILE
     resolutions = state.Resolutions.load(path)
@@ -193,7 +213,7 @@ def _run_resolutions(args, out, err) -> int:
     elif args.resolve_from:
         try:
             changed = resolutions.import_decisions(args.resolve_from, state=store)
-        except ConfigError as error:  # pragma: no cover - defensive
+        except (state.DecisionsFileError, ValueError) as error:
             print(f"error: {error}", file=err)
             return EXIT_ERROR
         verb = "imported"
@@ -201,15 +221,19 @@ def _run_resolutions(args, out, err) -> int:
         if not args.decision:
             print("error: --resolve requires --decision", file=err)
             return EXIT_ERROR
-        resolutions.resolve(
-            args.resolve,
-            args.decision,
-            resolved_at=args.resolved_at,
-            pr=args.pr,
-            note=args.note,
-            by=args.by,
-            state=store,
-        )
+        try:
+            resolutions.resolve(
+                args.resolve,
+                args.decision,
+                resolved_at=args.resolved_at,
+                pr=args.pr,
+                note=args.note,
+                by=args.by,
+                state=store,
+            )
+        except ValueError as error:
+            print(f"error: {error}", file=err)
+            return EXIT_ERROR
         changed = [args.resolve]
         verb = "resolved"
 
