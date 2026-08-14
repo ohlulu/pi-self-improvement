@@ -46,7 +46,7 @@ read_when:
 - [x] T020 [REQ-017] Implement resolutions registry (watermark suppression, regression re-emission, `wontfix`/`ignored` permanent suppress, pre-watermark history trim, `decisions.json` import) with tests covering AC-031, AC-032, AC-049. Verify: `python3 -m unittest tests.test_state` → GREEN
 - [x] T021 [REQ-018] Implement parser self-check: zero-tool-call warning in stderr + run metadata + packet, plus the counts block (root/subagent sessions, branch points, aborted/error turns, dangling toolCalls, skipped record types, non-canonical schema files) with tests covering AC-033, AC-050. Verify: `python3 -m unittest tests.test_state` → GREEN
 - [x] T022 [REQ-019] Implement `config.py` load/validate/apply with test covering AC-034. Verify: `python3 -m unittest tests.test_config` → GREEN
-- [ ] T023 [REQ-001,REQ-015,REQ-016] Implement `cli.py` (scan flags, resolve subflows, `manual_approval_required` marking, `--dry-run` with zero state/output/log writes) wiring all modules; tests assert output-root confinement over a temporary HOME snapshot (AC-001), latest-N selection (AC-003), complete evidence fields (AC-004), and dry-run purity (AC-048). Verify: `python3 -m unittest tests.test_cli` → GREEN
+- [x] T023 [REQ-001,REQ-015,REQ-016] Implement `cli.py` (scan flags, resolve subflows, `manual_approval_required` marking, `--dry-run` with zero state/output/log writes) wiring all modules; tests assert output-root confinement over a temporary HOME snapshot (AC-001), latest-N selection (AC-003), complete evidence fields (AC-004), and dry-run purity (AC-048). Verify: `python3 -m unittest tests.test_cli` → GREEN
 
 ## Phase 7: End-to-end and dogfood
 
