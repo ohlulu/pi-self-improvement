@@ -153,6 +153,71 @@ class Resolutions:
     def get(self, key: str) -> Resolution | None:
         return self.entries.get(key)
 
+    def resolve(
+        self,
+        key: str,
+        decision: str,
+        *,
+        resolved_at: str | None = None,
+        pr: str | None = None,
+        note: str | None = None,
+        by: str | None = None,
+        state: State | None = None,
+    ) -> Resolution:
+        """Record a decision and forget the recurrence it accumulated (REQ-017).
+
+        Trimming is not bookkeeping. A target resolved after five noisy runs
+        keeps that history otherwise, so its first regression is announced as
+        "also flagged in 5 previous run(s)" — the reviewer reads a brand-new
+        recurrence as an old one and cannot tell the fix ever worked (AC-049).
+        """
+        if decision not in DECISIONS:
+            raise ValueError(f"unknown decision: {decision!r}")
+        entry = Resolution(
+            key=key,
+            decision=decision,
+            resolved_at=resolved_at or datetime.now(timezone.utc).isoformat(),
+            pr=pr,
+            note=note,
+            by=by,
+        )
+        self.entries[key] = entry
+        if state is not None:
+            state.trim_recurrence(key, parse_timestamp(entry.resolved_at))
+        return entry
+
+    def unresolve(self, key: str) -> bool:
+        return self.entries.pop(key, None) is not None
+
+    def import_decisions(self, source, *, state: State | None = None) -> list[str]:
+        """Import a `decisions.json` handoff (AC-032).
+
+        Only the three real decisions are imported. `open` and `deferred` mean
+        the reviewer has not decided, so importing them would silently suppress
+        a proposal that is still under discussion.
+        """
+        payload = source if isinstance(source, (dict, list)) else _read_json(Path(source))
+        rows = payload.get("decisions", []) if isinstance(payload, dict) else payload
+        imported = []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            key = row.get("key") or row.get("target")
+            decision = row.get("decision")
+            if not key or decision not in DECISIONS:
+                continue
+            self.resolve(
+                key,
+                decision,
+                resolved_at=row.get("resolved_at"),
+                pr=row.get("pr"),
+                note=row.get("note"),
+                by=row.get("by"),
+                state=state,
+            )
+            imported.append(key)
+        return imported
+
     def apply(self, proposal: Proposal) -> tuple[Proposal | None, bool]:
         """Return the proposal as it survives resolution, and whether it regressed.
 
@@ -197,12 +262,19 @@ def _is_after(timestamp: str | None, watermark: datetime) -> bool:
 
 
 class State:
-    """Seen proposal ids and per-target recurrence history."""
+    """Seen proposal ids and per-target recurrence history.
+
+    Recurrence entries carry the run's timestamp, not just its id. Without a
+    date the registry cannot drop history from before a resolution, and the
+    first regression after a fix reports the recurrence it accumulated before
+    the fix — which is exactly what AC-049 forbids.
+    """
 
     def __init__(self, seen: dict | None = None, recurrence: dict | None = None):
         self.seen: dict[str, dict] = dict(seen or {})
-        self.recurrence: dict[str, list[str]] = {
-            key: list(value) for key, value in (recurrence or {}).items()
+        self.recurrence: dict[str, list[dict]] = {
+            key: [_recurrence_entry(item) for item in value]
+            for key, value in (recurrence or {}).items()
         }
 
     @classmethod
@@ -228,13 +300,41 @@ class State:
     def previous_runs(self, key: str) -> int:
         return len(self.recurrence.get(key, ()))
 
-    def record(self, staged: list[Staged], run_id: str) -> None:
+    def record(self, staged: list[Staged], run_id: str, at: str | None = None) -> None:
         """Commit a staged run. Never called on a dry run (DEC-017)."""
+        moment = at or datetime.now(timezone.utc).isoformat()
         for item in staged:
             self.seen.setdefault(item.id, {"key": item.key, "run_id": run_id})
             history = self.recurrence.setdefault(item.key, [])
-            if run_id not in history:
-                history.append(run_id)
+            if all(entry.get("run_id") != run_id for entry in history):
+                history.append({"run_id": run_id, "at": moment})
+
+    def trim_recurrence(self, key: str, watermark: datetime | None) -> int:
+        """Forget runs from before a resolution (REQ-017).
+
+        Undated entries go too: an entry that cannot be dated cannot be shown to
+        post-date the fix, and keeping it would inflate the first regression's
+        count — the precise failure AC-049 names.
+        """
+        history = self.recurrence.get(key)
+        if not history:
+            return 0
+        if watermark is None:
+            kept: list[dict] = []
+        else:
+            kept = [entry for entry in history if _is_after(entry.get("at"), watermark)]
+        removed = len(history) - len(kept)
+        if kept:
+            self.recurrence[key] = kept
+        else:
+            self.recurrence.pop(key, None)
+        return removed
+
+
+def _recurrence_entry(item) -> dict:
+    if isinstance(item, dict):
+        return {"run_id": item.get("run_id", ""), "at": item.get("at")}
+    return {"run_id": str(item), "at": None}
 
 
 def run_pipeline(
@@ -279,6 +379,26 @@ def run_pipeline(
         key=lambda item: (not item.regression, -item.previous_runs, item.route, item.target)
     )
     return result
+
+
+def self_check(counts) -> list[str]:
+    """Warnings a scan must surface loudly (REQ-018).
+
+    The zero-tool-call case is the one that matters: it is what a silent parser
+    break looks like from the outside. Everything appears to work, the scan
+    reports success, and it quietly finds nothing forever.
+    """
+    warnings = []
+    if counts.files and not counts.tool_calls:
+        warnings.append(
+            f"parsed {counts.files} transcript(s) but found 0 tool calls — "
+            "the parser may not match this pi version"
+        )
+    if counts.parse_errors:
+        warnings.append(f"{counts.parse_errors} transcript line(s) failed to parse")
+    if counts.non_canonical_files:
+        warnings.append(f"{counts.non_canonical_files} transcript(s) use a non-canonical schema")
+    return warnings
 
 
 def _read_json(path: Path) -> dict:
