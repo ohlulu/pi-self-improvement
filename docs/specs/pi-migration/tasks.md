@@ -25,8 +25,8 @@ read_when:
 
 ## Phase 4: Friction detectors (REQ-005–REQ-008 slice)
 
-- [ ] T008 [REQ-005,REQ-006] Write failing tests: isError precedence over text, heuristic fallback only when flag absent, hang from output not command. Covers AC-007–AC-010. Verify: `python3 -m unittest tests.test_detect` → RED
-- [ ] T009 [REQ-005,REQ-006] Implement failure + hang detection in `detect.py`. Verify: `python3 -m unittest tests.test_detect` → GREEN
+- [x] T008 [REQ-005,REQ-006] Write failing tests: isError precedence over text, heuristic fallback only when flag absent, hang from output not command. Covers AC-007–AC-010. Verify: `python3 -m unittest tests.test_detect` → RED
+- [x] T009 [REQ-005,REQ-006] Implement failure + hang detection in `detect.py`. Verify: `python3 -m unittest tests.test_detect` → GREEN
 - [ ] T010 [REQ-008] Implement silent-empty detection (data-intent classifier, empty payload match, swallowed check, ignore lists) with tests covering AC-013, AC-014. Verify: `python3 -m unittest tests.test_detect` → GREEN
 - [ ] T011 [REQ-007] Implement tracked-CLI attribution (config list + suffix), `bashExecution` exit-code and `cancelled` attribution, and retry-shape detection, with tests covering AC-011, AC-012, AC-043. Verify: `python3 -m unittest tests.test_detect` → GREEN
 
