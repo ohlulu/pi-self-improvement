@@ -20,8 +20,8 @@ read_when:
 
 ## Phase 3: Redaction (REQ-004 slice)
 
-- [ ] T006 [REQ-004] Write redaction corpus test: secret shapes (emails, phones, auth headers, cloud keys, JWT, private keys, long tokens) never survive into any transcript-derived string — excerpt, command, arguments, summary, or displayed path (AC-005); `--full` marks `local_only: true` in run metadata, proposal JSON and packet (AC-006); a canary scan over the whole temporary output root finds nothing (AC-042). Verify: `python3 -m unittest tests.test_redaction_corpus` → RED
-- [ ] T007 [REQ-004] Implement `redact.py` as the single redaction boundary (pattern set + excerpt shortening + `--full` bypass + output-root canary scan). Verify: `python3 -m unittest tests.test_redaction_corpus` → GREEN
+- [x] T006 [REQ-004] Write redaction corpus test: secret shapes (emails, phones, auth headers, cloud keys, JWT, private keys, long tokens) never survive into any transcript-derived string — excerpt, command, arguments, summary, or displayed path (AC-005); `--full` marks `local_only: true` in run metadata, proposal JSON and packet (AC-006); a canary scan over the whole temporary output root finds nothing (AC-042). Verify: `python3 -m unittest tests.test_redaction_corpus` → RED
+- [x] T007 [REQ-004] Implement `redact.py` as the single redaction boundary (pattern set + excerpt shortening + `--full` bypass + output-root canary scan). Verify: `python3 -m unittest tests.test_redaction_corpus` → GREEN
 
 ## Phase 4: Friction detectors (REQ-005–REQ-008 slice)
 
