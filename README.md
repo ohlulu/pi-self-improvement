@@ -2,7 +2,7 @@
 
 A pi-native self-improvement loop: mine your [pi](https://github.com/badlogic/pi-mono) session transcripts for recurring friction — failing CLIs, hanging commands, silently empty results, corrections you keep typing — and stage approval-gated fix proposals. It never changes anything on its own.
 
-**Status: design phase.** The full migration plan lives in [`docs/specs/pi-migration/`](docs/specs/pi-migration/) (requirements / plan / tasks; body text in Traditional Chinese). Project vocabulary is in [`CONTEXT.md`](CONTEXT.md); the decisions that outlive the plan are in [`docs/adr/`](docs/adr/).
+**Status: the miner works; the closing half is not built yet.** Scanning, detection, routing, staging, state and the CLI are implemented and tested. The scheduled triage pass and the `learn-loop` skill are still to come. The full migration plan lives in [`docs/specs/pi-migration/`](docs/specs/pi-migration/) (requirements / plan / tasks; body text in Traditional Chinese). Project vocabulary is in [`CONTEXT.md`](CONTEXT.md); the decisions that outlive the plan are in [`docs/adr/`](docs/adr/).
 
 ## Why
 
@@ -19,6 +19,100 @@ Most people point AI at their work. The higher-leverage loop points it at your o
 4. **Stage** proposals and a human-readable review packet. Apply stays manual, always.
 
 Plus a closing half: a scheduled headless triage pass (`pi -p` with a read-only tool allowlist — no shell, no `write`, no `edit`; a deterministic host-side writer is the only thing that touches disk) and an interactive `learn-loop` skill that executes the approved queue.
+
+## Usage
+
+```bash
+pip install -e .
+
+# preview the last 7 days without writing anything
+pi-self-improvement --dry-run
+
+# scan and stage
+pi-self-improvement --since-days 7
+```
+
+A first run scans only the default window. History outside it enters **only** through an explicit `--all`, so installing this tool never triggers a surprise backfill. Preview one first — `--dry-run` writes nothing at all, not even state, so the preview cannot suppress the real run:
+
+```bash
+pi-self-improvement --all --dry-run | less
+pi-self-improvement --all
+```
+
+### Reviewing and deciding
+
+Read `review-packets/<run-id>.md`, then record what you decided. Nothing is applied by this tool — `fixed` is you telling it you already fixed the thing.
+
+```bash
+pi-self-improvement --resolve tool:demo-cli --decision fixed --pr 42 --note "pinned the version"
+pi-self-improvement --resolve-from decisions.json     # batch import
+pi-self-improvement --list-resolutions
+pi-self-improvement --unresolve tool:demo-cli
+```
+
+`fixed` is a watermark: evidence from before it stays suppressed, and anything newer comes back flagged as a regression. `wontfix` and `ignored` suppress permanently.
+
+### Flags
+
+| Flag | Effect |
+|------|--------|
+| `--since-days N` | Time window, default 7. Filters root sessions by mtime. |
+| `--all` | Ignore the window. Never happens automatically. |
+| `--max-sessions N` | Keep the newest N **root** sessions; their subagent sessions come along and consume no quota. |
+| `--dry-run` | Print the packet to stdout. Writes no files, no state, no logs. |
+| `--full` | Keep excerpts unredacted. Marks every output `local_only` — **do not share those files.** |
+| `--include-seen` | Stage proposals already staged in an earlier run. |
+| `--include-resolved` | Ignore the resolutions registry for this run. |
+| `--output-root PATH` | Where to write. Default `~/.pi-self-improvement/`. |
+| `--config PATH` | Config file. Default `<output-root>/config.json`. |
+| `--machine NAME` | Recorded in run metadata, for multi-machine setups. |
+
+## Output layout
+
+Everything is written under the output root and nowhere else — the tool never modifies a skill, a memory file, config, or source code.
+
+```
+~/.pi-self-improvement/
+  config.json               # yours to write; optional
+  state.json                # seen proposal ids + per-target recurrence history
+  resolutions.json          # route:target -> decision + watermark
+  runs/<run-id>.json        # metadata, counts, parser warnings
+  proposals/<run-id>/*.json # one per proposal, with its evidence
+  review-packets/<run-id>.md# what a human actually reads
+```
+
+Evidence is a `path:line` reference plus a short excerpt (360 characters by default), never a copy of the transcript. Every proposal carries `manual_approval_required: true`.
+
+## Configuration
+
+Optional, at `<output-root>/config.json`. Defaults are deliberately generic: anything tied to your personal extensions belongs here, never in a default. Unknown keys are rejected rather than ignored, because a silently dropped key is indistinguishable from one that had no effect.
+
+| Key | Type | Purpose |
+|-----|------|---------|
+| `tracked_clis` | list | CLIs whose failures and retries you care about. |
+| `tracked_cli_suffix` | list | Suffix rule for the same, default `["-cli"]`. |
+| `cue_packs` | object | Enable, disable or extend correction cue packs (`en`, `zh-Hant`). |
+| `extra_scaffold_markers` | list | Extra markers identifying injected scaffold text. |
+| `extra_redaction_patterns` | list | Additional secret shapes to mask; compiled at load. |
+| `ext_family_map` | object | Override how flat tool names group into `ext:<family>`. |
+| `extra_backlog_ignore` | list | Programs never worth a backlog entry. |
+| `include_subagent_failures` | bool | Let subagent failures reach the backlog. Default false. |
+| `skill_loaded_custom_types` | list | Custom record types that signal a skill load. |
+| `detect_silent_empty` | bool | Toggle silent-empty detection. |
+| `silent_empty_fetch_verbs` | list | Verbs that imply a call should have returned data. |
+| `silent_empty_ignore` | list | Commands whose empty result is a valid answer. |
+
+```json
+{
+  "tracked_clis": ["my-deploy-tool"],
+  "extra_backlog_ignore": ["cat", "sed"],
+  "cue_packs": { "en": { "strong": ["that is backwards"] } }
+}
+```
+
+## Privacy
+
+Every transcript-derived string passes one redaction boundary before it reaches disk — commands, arguments, excerpts, summaries, paths. Emails, phone numbers, auth headers, cloud keys, private-key blocks, JWTs and long opaque tokens are masked. A corpus test asserts that none of a canary set survives into a written output root; a second test asserts `--full` *does* leak them, so the first cannot pass by staging nothing.
 
 ## Development
 
