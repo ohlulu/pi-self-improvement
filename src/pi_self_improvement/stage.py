@@ -79,6 +79,7 @@ def write_run(
             "started_at": started_at,
             "local_only": local_only,
             "machine": machine,
+            "manual_approval_required": True,
             "warnings": warnings,
             "counts": counts.to_dict() if counts is not None else {},
             "proposals": [
@@ -107,6 +108,10 @@ def write_run(
 def _proposal_payload(item: Staged, run_id: str, local_only: bool, machine: str | None) -> dict:
     return {
         "schema_version": SCHEMA_VERSION,
+        # REQ-001 is the whole safety story, so it is a constant rather than a
+        # parameter: there is no code path that can stage a proposal claiming it
+        # may be applied without a human.
+        "manual_approval_required": True,
         "id": item.id,
         "run_id": run_id,
         "key": item.key,
@@ -153,6 +158,8 @@ def render_packet(
     lines += [
         f"{len(staged)} proposal(s): {len(regressions)} regression, "
         f"{len(recurring)} recurring, {len(fresh)} new.",
+        "",
+        "Every proposal below requires manual approval. This tool does not apply changes.",
         "",
     ]
     for title, group in (
