@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .model import ParseCounts
 from .redact import Redactor
-from .state import SCHEMA_VERSION, Staged
+from .state import SCHEMA_VERSION, Staged, self_check
 
 RUNS_DIR = "runs"
 PROPOSALS_DIR = "proposals"
@@ -55,7 +55,13 @@ def write_run(
     root = Path(output_root)
     run_id = run_id or new_run_id()
     local_only = bool(redactor.local_only) if redactor is not None else False
+    # Derived here, not taken on trust: REQ-018 requires the warning to reach
+    # run metadata and the packet, and a caller that forgets to pass it is
+    # exactly the silent-parser-break scenario the warning exists to catch.
     warnings = list(warnings)
+    for warning in self_check(counts) if counts is not None else []:
+        if warning not in warnings:
+            warnings.append(warning)
     started_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     proposal_paths = []

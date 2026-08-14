@@ -151,7 +151,13 @@ class TestPacketOrdering(StageTestCase):
         self.assertIn("also flagged in 3 previous run(s)", packet)
 
     def test_a_first_regression_is_not_described_as_recurring(self):
-        """AC-049: a first regression must not read as accumulated recurrence."""
+        """AC-049 at the renderer only — this hand-builds previous_runs=0.
+
+        The flow that actually produces it (resolve trimming pre-watermark
+        history) is covered by test_state.TestResolveAndTrim. Do not treat this
+        as end-to-end coverage: it passed for months of iteration while the real
+        pipeline reported "also flagged in 5 previous run(s)".
+        """
         packet = stage.render_packet([staged("back", regression=True)], "R1", None, False)
 
         self.assertIn("regressed after being resolved", packet)
@@ -202,7 +208,7 @@ class TestLocalOnlyPropagation(StageTestCase):
 
 class TestWarningsAndCounts(StageTestCase):
     def test_a_warning_reaches_run_metadata_and_the_packet(self):
-        """Half of AC-033; stderr is the CLI's half."""
+        """Two thirds of AC-033; stderr is the CLI's half, owed by T023."""
         stage.write_run(self.root, [], run_id="R1", warnings=["no tool calls parsed"])
 
         run = json.loads((self.root / "runs" / "R1.json").read_text(encoding="utf-8"))
@@ -210,6 +216,33 @@ class TestWarningsAndCounts(StageTestCase):
 
         self.assertEqual(run["warnings"], ["no tool calls parsed"])
         self.assertIn("no tool calls parsed", packet)
+
+    def test_the_zero_tool_call_warning_is_derived_not_passed(self):
+        """A caller who forgets to pass the warning is the exact scenario the
+        warning exists to catch, so staging derives it from the counts."""
+        stage.write_run(self.root, [], run_id="R1", counts=ParseCounts(files=12, tool_calls=0))
+
+        run = json.loads((self.root / "runs" / "R1.json").read_text(encoding="utf-8"))
+        packet = (self.root / "review-packets" / "R1.md").read_text(encoding="utf-8")
+
+        self.assertTrue(any("0 tool calls" in warning for warning in run["warnings"]))
+        self.assertIn("0 tool calls", packet)
+
+    def test_a_healthy_run_carries_no_warnings(self):
+        stage.write_run(self.root, [], run_id="R1", counts=ParseCounts(files=12, tool_calls=340))
+
+        run = json.loads((self.root / "runs" / "R1.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(run["warnings"], [])
+
+    def test_a_derived_warning_is_not_duplicated(self):
+        counts = ParseCounts(files=12, tool_calls=0)
+        passed = state.self_check(counts)
+
+        stage.write_run(self.root, [], run_id="R1", counts=counts, warnings=passed)
+        run = json.loads((self.root / "runs" / "R1.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(len(run["warnings"]), 1)
 
     def test_the_counts_block_is_rendered_in_the_packet(self):
         counts = ParseCounts(files=3, root_sessions=2, subagent_sessions=1, branch_points=4)
