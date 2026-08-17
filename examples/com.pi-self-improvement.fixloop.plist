@@ -31,6 +31,10 @@
         <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
     </dict>
 
+    <!-- Do not fire on load. `launchctl load` runs at install and at every
+         login, and an unattended pi run costs tokens. Sleeping through the
+         slot is already covered without this: launchd fires a missed
+         StartCalendarInterval once on wake. -->
     <key>RunAtLoad</key>
     <false/>
 
