@@ -796,6 +796,28 @@ class TestAttributionGuards(unittest.TestCase):
     def test_an_ordinary_command_is_unaffected(self):
         self.assertEqual(detect.executable_of("demo-cli list --json"), "demo-cli")
 
+    def test_a_loop_body_is_the_program_not_the_keyword(self):
+        """`for` and `do` are syntax. Attributing a loop to them hides every
+        failure of a CLI that is only ever run inside one."""
+        self.assertEqual(
+            detect.executable_of("for i in 1 2 3; do demo-cli run; done"), "demo-cli"
+        )
+        self.assertEqual(detect.executable_of("for f in *.txt; do grep x $f; done"), "grep")
+
+    def test_a_while_body_outranks_the_read_that_drives_it(self):
+        self.assertEqual(
+            detect.executable_of("while read line; do demo-cli $line; done"), "demo-cli"
+        )
+
+    def test_a_conditional_body_is_the_program(self):
+        self.assertEqual(detect.executable_of("if [ -f x ]; then demo-cli go; fi"), "demo-cli")
+
+    def test_a_code_fragment_is_not_a_program(self):
+        """A transcript sometimes records source where a command belongs."""
+        for fragment in ("const x = 1", "let y = 2", "function foo() {", "import os"):
+            with self.subTest(fragment=fragment):
+                self.assertIsNone(detect.executable_of(fragment))
+
 
 class TestDanglingCallsProduceNoEvidence(DetectTestCase):
     """AC-041: a toolCall with no result is counted, never turned into evidence."""

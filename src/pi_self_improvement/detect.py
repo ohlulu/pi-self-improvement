@@ -40,7 +40,36 @@ _WRAPPERS = frozenset(
 )
 
 #: Shell built-ins that are rarely the point of a command line.
-_SHELL_NOISE = frozenset({"cd", "export", "set", "source", ".", "unset", "pushd", "popd"})
+_SHELL_NOISE = frozenset(
+    {"cd", "export", "set", "source", ".", "unset", "pushd", "popd", "read"}
+)
+
+#: Control-flow words that prefix a command: the program is a later token in the
+#: same segment. Without this, `for f in *; do demo-cli run; done` attributes the
+#: failure to `do`, so a CLI that only ever runs inside a loop is never seen.
+_CONTROL_PREFIXES = frozenset({"do", "then", "else", "elif", "if", "while", "until", "!"})
+
+#: Control-flow words that never precede a program: `for i in 1 2 3` names a
+#: variable, and `done` or `fi` closes a block. The segment holds no executable.
+_CONTROL_TERMINALS = frozenset({"for", "done", "fi", "esac", "case", "select", "in"})
+
+#: Source-code keywords. A transcript sometimes records a code fragment where a
+#: command belongs, and `const x = 1` is not a program called `const`.
+_CODE_KEYWORDS = frozenset(
+    {
+        "const",
+        "let",
+        "var",
+        "function",
+        "class",
+        "def",
+        "import",
+        "return",
+        "async",
+        "await",
+        "new",
+    }
+)
 
 #: Data producers at the head of a pipeline. `printf x | demo-cli list` is about
 #: demo-cli, so attributing the failure to printf discards a tracked CLI.
@@ -234,8 +263,12 @@ def _analyze_segment(segment: str) -> tuple[str, str | None, tuple[str, ...]] | 
             if _ENV_ASSIGNMENT.match(token) or token.isdigit() or token.startswith("-"):
                 continue
             bare = token.rsplit("/", 1)[-1]
-            if bare in _WRAPPERS:
+            if bare in _WRAPPERS or bare in _CONTROL_PREFIXES:
                 continue
+            if bare in _CONTROL_TERMINALS or bare in _CODE_KEYWORDS:
+                # Shell syntax or a code fragment, not a program. Give up on the
+                # segment rather than promoting the next token.
+                return None
             if not _PLAUSIBLE_EXECUTABLE.match(bare):
                 # Not a program: a comment marker, `[`, a quoted fragment. Give up
                 # on this segment rather than promoting the next token.
