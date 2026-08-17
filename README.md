@@ -20,11 +20,31 @@ Most people point AI at their work. The higher-leverage loop points it at your o
 
 Plus a closing half: a scheduled headless triage pass (`pi -p` with a read-only tool allowlist — no shell, no `write`, no `edit`; a deterministic host-side writer is the only thing that touches disk) and an interactive `learn-loop` skill that executes the approved queue.
 
+## Install
+
+```bash
+uv tool install git+https://github.com/ohlulu/pi-self-improvement@v0.1.0
+```
+
+Or with pipx, if that is what you already have:
+
+```bash
+pipx install git+https://github.com/ohlulu/pi-self-improvement@v0.1.0
+```
+
+Either one puts a single `pi-self-improvement` command on your PATH inside its own environment. There is nothing to resolve — the package is standard library only.
+
+Updating means installing the tag you want, because a different ref is a different resolution:
+
+```bash
+uv tool install git+https://github.com/ohlulu/pi-self-improvement@v0.2.0
+```
+
+`uv tool upgrade` is not the update path here. A git install carries no version to compare against, so it reports `Nothing to upgrade` and leaves you on the old commit.
+
 ## Usage
 
 ```bash
-pip install -e .
-
 # preview the last 7 days without writing anything
 pi-self-improvement --dry-run
 
@@ -115,6 +135,8 @@ Optional, at `<output-root>/config.json`. Defaults are deliberately generic: any
 
 Two launchd jobs: the miner twice weekly, the triage pass daily. Examples are in [`examples/`](examples/), runners in [`templates/`](templates/).
 
+These files ship in the repository rather than with the command, so this section and the `learn-loop` skill both assume a checkout: `git clone https://github.com/ohlulu/pi-self-improvement` and run the commands below from it.
+
 ```bash
 mkdir -p ~/.pi-self-improvement/bin
 cp templates/miner-run.sh templates/fixloop-run.sh templates/fixloop-prompt.md ~/.pi-self-improvement/bin/
@@ -165,6 +187,14 @@ Every transcript-derived string passes one redaction boundary before it reaches 
 ## Development
 
 Python >= 3.10, standard library only — no runtime or test dependencies.
+
+An editable install points the command at your checkout, so an edit under `src/` takes effect on the next run with nothing to reinstall:
+
+```bash
+git clone https://github.com/ohlulu/pi-self-improvement
+cd pi-self-improvement
+uv tool install --editable .
+```
 
 ```bash
 # run the suite from a bare checkout (tests/__init__.py puts src/ on sys.path)
