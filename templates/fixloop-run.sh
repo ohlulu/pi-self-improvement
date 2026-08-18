@@ -67,7 +67,10 @@ if [ -f "$MARKER" ] && [ "$(cat "$MARKER" 2>/dev/null)" = "$PACKET_NAME" ]; then
   exit 0
 fi
 
-TRIAGE_OUT="$(mktemp -t fixloop-triage)"
+# A full template rather than `mktemp -t <prefix>`: BSD reads -t as a prefix,
+# GNU requires the XXXXXX and fails without it. On GNU that left TRIAGE_OUT
+# empty, so the redirect below became `>""` and every run died before pi ran.
+TRIAGE_OUT="$(mktemp "${TMPDIR:-/tmp}/fixloop-triage.XXXXXX")"
 cleanup() {
   rm -f "$TRIAGE_OUT"
 }
