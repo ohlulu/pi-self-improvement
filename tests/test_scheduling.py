@@ -6,6 +6,7 @@ which is the change that would silently open a blind spot.
 """
 
 import plistlib
+import shutil
 import subprocess
 import unittest
 from pathlib import Path
@@ -59,6 +60,7 @@ class TestPlistsAreValid(unittest.TestCase):
         self.assertEqual(load(MINER_PLIST)["Label"], "com.pi-self-improvement.miner")
         self.assertEqual(load(FIXLOOP_PLIST)["Label"], "com.pi-self-improvement.fixloop")
 
+    @unittest.skipUnless(shutil.which("plutil"), "plutil ships with macOS only")
     def test_plutil_accepts_them(self):
         for path in sorted(EXAMPLES.glob("*.plist")):
             with self.subTest(plist=path.name):
