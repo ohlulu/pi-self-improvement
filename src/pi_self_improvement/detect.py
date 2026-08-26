@@ -81,7 +81,14 @@ _PIPE_PRODUCERS = frozenset({"echo", "printf", "cat", "yes", "seq"})
 _WRAPPER_VALUE_OPTIONS = frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"})
 
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-_SEGMENT_SPLIT = re.compile(r"\s*(?:&&|\|\||;|\|)\s*")
+#: Fast path for the common command with no quoting to respect.
+_SEGMENT_SPLIT = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
+
+#: A newline separates commands like `;` does, so a multi-line script is a
+#: sequence rather than one command named after its first line. Splitting on it
+#: is only safe once quoting is respected: `echo "first\nnode broken"` would
+#: otherwise be read as running `node`.
+_SEPARATORS = ("&&", "||", ";", "|", "\n")
 
 #: A heredoc body is data, not commands. Without stripping it, a commit message
 #: containing "...the boring part; the migration also..." is split on the
@@ -240,7 +247,7 @@ def _analyze(command: str | None) -> tuple[str | None, str | None, tuple[str, ..
         return None, None, ()
 
     fallback: tuple[str, str | None, tuple[str, ...]] | None = None
-    for segment in _SEGMENT_SPLIT.split(_strip_heredocs(command).strip()):
+    for segment in _split_segments(_strip_heredocs(command).strip()):
         parsed = _analyze_segment(segment)
         if parsed is None:
             continue
@@ -249,6 +256,58 @@ def _analyze(command: str | None) -> tuple[str | None, str | None, tuple[str, ..
         if parsed[0] not in _SHELL_NOISE and parsed[0] not in _PIPE_PRODUCERS:
             return parsed
     return fallback if fallback is not None else (None, None, ())
+
+
+def _split_segments(command: str) -> list[str]:
+    """Split a command line on shell separators that are not inside quotes."""
+    if "'" not in command and '"' not in command and "$(" not in command:
+        return _SEGMENT_SPLIT.split(command)
+
+    segments: list[str] = []
+    current: list[str] = []
+    quote = ""
+    depth = 0
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if quote:
+            if char == quote:
+                quote = ""
+            current.append(char)
+            index += 1
+            continue
+        if char in "'\"":
+            quote = char
+            current.append(char)
+            index += 1
+            continue
+        if command.startswith("$(", index):
+            # A command substitution is one value: the `|` in
+            # `X=$(find . | head -1)` does not start a new command.
+            depth += 1
+            current.append(command[index : index + 2])
+            index += 2
+            continue
+        if depth and char == ")":
+            depth -= 1
+            current.append(char)
+            index += 1
+            continue
+        if depth:
+            current.append(char)
+            index += 1
+            continue
+        for separator in _SEPARATORS:
+            if command.startswith(separator, index):
+                segments.append("".join(current).strip())
+                current = []
+                index += len(separator)
+                break
+        else:
+            current.append(char)
+            index += 1
+    segments.append("".join(current).strip())
+    return segments
 
 
 def _strip_heredocs(command: str) -> str:
@@ -282,6 +341,16 @@ def _opening_quote(token: str) -> str:
     return "" if value[1:].endswith(quote) else quote
 
 
+def _opens_substitution(token: str) -> bool:
+    """Whether an assignment opens a `$(...)` value it does not close.
+
+    `APP_PATH=$(find .derivedData -name x)` is one value. Reading on used to
+    take the substitution's first argument as the program.
+    """
+    value = token.split("=", 1)[1]
+    return value.startswith("$(") and value.count("(") > value.count(")")
+
+
 def _analyze_segment(segment: str) -> tuple[str, str | None, tuple[str, ...]] | None:
     executable: str | None = None
     subcommand: str | None = None
@@ -290,6 +359,7 @@ def _analyze_segment(segment: str) -> tuple[str, str | None, tuple[str, ...]] | 
 
     skip_next = False
     open_quote = ""
+    open_substitution = False
     for token in segment.split():
         if executable is None:
             if open_quote:
@@ -297,6 +367,10 @@ def _analyze_segment(segment: str) -> tuple[str, str | None, tuple[str, ...]] | 
                 # is one value, and its last path used to be read as a program.
                 if token.endswith(open_quote):
                     open_quote = ""
+                continue
+            if open_substitution:
+                if token.count(")") > token.count("("):
+                    open_substitution = False
                 continue
             if skip_next:
                 skip_next = False
@@ -306,8 +380,13 @@ def _analyze_segment(segment: str) -> tuple[str, str | None, tuple[str, ...]] | 
                 continue
             if _ENV_ASSIGNMENT.match(token):
                 open_quote = _opening_quote(token)
+                open_substitution = not open_quote and _opens_substitution(token)
                 continue
             if token.isdigit() or token.startswith("-"):
+                continue
+            if ">" in token or "<" in token:
+                # A redirection is shell syntax: `gtimeout --version 2>/dev/null`
+                # used to be attributed to a program named `null`.
                 continue
             bare = token.rsplit("/", 1)[-1]
             if bare in _WRAPPERS or bare in _CONTROL_PREFIXES:

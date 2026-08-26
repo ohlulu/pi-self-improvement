@@ -849,6 +849,59 @@ class TestAttributionGuards(unittest.TestCase):
     def test_an_assignment_closing_its_quote_still_yields_the_program(self):
         self.assertEqual(detect.executable_of('FOO="bar" demo-cli list'), "demo-cli")
 
+    def test_a_newline_separates_commands(self):
+        """A multi-line script is a sequence. Without this the whole script is
+        attributed to its first line, which is usually `cd` or a comment."""
+        self.assertEqual(detect.executable_of("cd /tmp\ndemo-cli build"), "demo-cli")
+        self.assertEqual(detect.executable_of("# set up\ndemo-cli run"), "demo-cli")
+
+    def test_the_command_after_a_heredoc_is_the_program(self):
+        """The probe that fails is the one run on the file, not the `cat` that
+        wrote it."""
+        command = "cat > /tmp/probe.mjs <<'EOF'\nimport x from 'y';\nEOF\nnode /tmp/probe.mjs"
+        self.assertEqual(detect.executable_of(command), "node")
+
+    def test_a_backslash_continuation_stays_one_command(self):
+        self.assertEqual(detect.executable_of("demo-cli run \\\n  --flag x"), "demo-cli")
+
+    def test_a_separator_inside_quotes_does_not_split(self):
+        """Splitting on a quoted newline or semicolon reads the text of a commit
+        message as a command, which is how prose became a backlog target."""
+        self.assertEqual(detect.executable_of('echo "first line\nnode broken"'), "echo")
+        self.assertEqual(
+            detect.executable_of('git commit -m "fix: a; node broken"'), "git"
+        )
+
+    def test_a_command_substitution_value_is_not_the_program(self):
+        """`APP_PATH=$(find .derivedData -name x)` is one value. Its first
+        argument used to become a program named `.derivedData`, hiding the
+        `xcrun` call that actually failed."""
+        command = (
+            "cd /tmp/app && "
+            'APP_PATH=$(find .derivedData -name "App.app" | head -1) && '
+            'xcrun simctl install ID "$APP_PATH"'
+        )
+        self.assertEqual(detect.executable_of(command), "xcrun")
+
+    def test_a_pipe_inside_a_substitution_does_not_split(self):
+        self.assertEqual(detect.executable_of('OUT=$(ls -1 | wc -l) demo-cli run'), "demo-cli")
+
+    def test_a_substitution_closed_in_one_token_is_unaffected(self):
+        self.assertEqual(detect.executable_of("N=$(nproc) demo-cli build"), "demo-cli")
+
+    def test_a_redirection_is_not_the_program(self):
+        """`gtimeout` is a wrapper, so scanning continued into `2>/dev/null` and
+        attributed the call to a program named `null`."""
+        self.assertIsNone(detect.executable_of("gtimeout --version 2>/dev/null"))
+        self.assertEqual(detect.executable_of("demo-cli run > out.txt 2>&1"), "demo-cli")
+
+    def test_a_quoted_separator_never_promotes_the_quoted_text(self):
+        """Both candidates here are shell noise, so the result is ignorable either
+        way. What matters is that `node` is not reachable from inside quotes."""
+        self.assertNotEqual(
+            detect.executable_of('cd /tmp && echo "a; node broken"'), "node"
+        )
+
     def test_a_conditional_body_is_the_program(self):
         self.assertEqual(detect.executable_of("if [ -f x ]; then demo-cli go; fi"), "demo-cli")
 
