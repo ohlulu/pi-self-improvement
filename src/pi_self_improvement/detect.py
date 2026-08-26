@@ -83,6 +83,12 @@ _WRAPPER_VALUE_OPTIONS = frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--s
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 _SEGMENT_SPLIT = re.compile(r"\s*(?:&&|\|\||;|\|)\s*")
 
+#: A heredoc body is data, not commands. Without stripping it, a commit message
+#: containing "...the boring part; the migration also..." is split on the
+#: semicolon and attributed to a program named `the`, and the `EOF` terminator
+#: becomes a program of its own.
+_HEREDOC_START = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
 #: A program name, as opposed to a comment marker, a test bracket or a quoted
 #: string. Without this, `# Check the thing` attributes evidence to `#`.
 _PLAUSIBLE_EXECUTABLE = re.compile(r"^[A-Za-z0-9_.+-]+$")
@@ -234,7 +240,7 @@ def _analyze(command: str | None) -> tuple[str | None, str | None, tuple[str, ..
         return None, None, ()
 
     fallback: tuple[str, str | None, tuple[str, ...]] | None = None
-    for segment in _SEGMENT_SPLIT.split(command.strip()):
+    for segment in _SEGMENT_SPLIT.split(_strip_heredocs(command).strip()):
         parsed = _analyze_segment(segment)
         if parsed is None:
             continue
@@ -245,6 +251,37 @@ def _analyze(command: str | None) -> tuple[str | None, str | None, tuple[str, ..
     return fallback if fallback is not None else (None, None, ())
 
 
+def _strip_heredocs(command: str) -> str:
+    """Drop every heredoc body and terminator, keeping the command line itself."""
+    if "<<" not in command:
+        return command
+
+    lines = command.split("\n")
+    kept: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        kept.append(line)
+        index += 1
+        match = _HEREDOC_START.search(line)
+        if match is None:
+            continue
+        terminator = match.group(2)
+        while index < len(lines) and lines[index].strip() != terminator:
+            index += 1
+        index += 1  # the terminator line is shell syntax, not a command
+    return "\n".join(kept)
+
+
+def _opening_quote(token: str) -> str:
+    """The quote an assignment opens and does not close in this token, if any."""
+    value = token.split("=", 1)[1]
+    if not value or value[0] not in "'\"":
+        return ""
+    quote = value[0]
+    return "" if value[1:].endswith(quote) else quote
+
+
 def _analyze_segment(segment: str) -> tuple[str, str | None, tuple[str, ...]] | None:
     executable: str | None = None
     subcommand: str | None = None
@@ -252,15 +289,25 @@ def _analyze_segment(segment: str) -> tuple[str, str | None, tuple[str, ...]] | 
     flags: set[str] = set()
 
     skip_next = False
+    open_quote = ""
     for token in segment.split():
         if executable is None:
+            if open_quote:
+                # Inside a quoted assignment value: `GG="git --git-dir x/.git"`
+                # is one value, and its last path used to be read as a program.
+                if token.endswith(open_quote):
+                    open_quote = ""
+                continue
             if skip_next:
                 skip_next = False
                 continue
             if token in _WRAPPER_VALUE_OPTIONS:
                 skip_next = True
                 continue
-            if _ENV_ASSIGNMENT.match(token) or token.isdigit() or token.startswith("-"):
+            if _ENV_ASSIGNMENT.match(token):
+                open_quote = _opening_quote(token)
+                continue
+            if token.isdigit() or token.startswith("-"):
                 continue
             bare = token.rsplit("/", 1)[-1]
             if bare in _WRAPPERS or bare in _CONTROL_PREFIXES:
