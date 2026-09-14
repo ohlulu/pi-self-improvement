@@ -41,6 +41,12 @@ KNOWN_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 
 _RUN_DIR = re.compile(r"run-\d+\Z")
 
+#: pi-subagents writes its own debug transcripts (a different record schema, no
+#: `session` header) under `<cwd-slug>/subagent-artifacts/`. They are not sessions,
+#: and without this they inflate `root_sessions`, consume `--max-sessions` quota,
+#: and each count as a non-canonical file.
+_ARTIFACTS_DIR = "subagent-artifacts"
+
 #: Pi appends the exit status to a bash result's text and only sometimes repeats
 #: it in `details`. Reading it here means detectors get the status for every bash
 #: call rather than the ~8% that carry the structured field.
@@ -146,6 +152,8 @@ def _collect_paths(roots) -> list[Path]:
         if not base.is_dir():
             continue
         for path in sorted(base.rglob("*.jsonl")):
+            if _ARTIFACTS_DIR in path.relative_to(base).parts:
+                continue
             resolved = path.resolve()
             if resolved in seen:
                 continue

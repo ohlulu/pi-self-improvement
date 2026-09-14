@@ -69,6 +69,21 @@ class TestDiscoveryWindow(DiscoveryTestCase):
 
         self.assertEqual(found, {"fresh", "other"})
 
+    def test_subagent_artifact_transcripts_are_not_sessions(self):
+        """pi-subagents' `<slug>/subagent-artifacts/*_transcript.jsonl` use a
+        different schema and must not be discovered as root sessions."""
+        self.make_root("real", days_ago=0.1)
+        artifacts = self.sessions / "--tmp-alpha--" / "subagent-artifacts"
+        artifact = support.write_jsonl(
+            artifacts / "ef1b9bc6_review-finder_transcript.jsonl",
+            [{"version": 1, "recordType": "message", "role": "user", "text": "hi"}],
+        )
+        support.age(artifact, 0.05, now=NOW)
+
+        found = {t.path.stem for t in self.discover()}
+
+        self.assertEqual(found, {"real"})
+
     def test_missing_root_is_ignored_not_fatal(self):
         self.assertEqual(parse.discover_transcripts([self.tmp / "nope"], now=NOW), [])
 

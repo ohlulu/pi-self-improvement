@@ -17,3 +17,5 @@ Detection keys on the nested path shape, which lives under pi's session director
 therefore unaffected by pi-subagents moving its artifacts directory from
 `<repo>/.pi-subagents/` to `<repo>/.pi/subagents/`, and unaffected by that directory being
 pruned — the nested transcripts persist after the artifacts are cleaned up.
+
+pi-subagents also writes its own debug transcripts to `sessions/<cwd-slug>/subagent-artifacts/*_transcript.jsonl`. Those use a different record schema and carry no `session` header, so they are not sessions of either origin: discovery skips any path under a `subagent-artifacts/` directory rather than letting them surface as non-canonical root sessions.
