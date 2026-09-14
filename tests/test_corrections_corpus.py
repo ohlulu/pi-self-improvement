@@ -215,6 +215,14 @@ class TestVerbosityTopic(unittest.TestCase):
         "有些太冗長了",
         "太長了，可以簡短一點嗎？",
         "你前面太多字眼我看不懂",
+        "AGENTS.md 也有點冗長",
+        "你也幫我看看有沒有冗餘的內容",
+        "這段有點冗於",
+        "這句就夠了，搞這麼冗長幹嘛",
+        "關於 git hook 落落長寫了一段，我覺得可以直接刪",
+        "兩行雷點是否有點多餘？",
+        "這樣寫有點累贅",
+        "This is rambling, get to the point.",
         "Your reply is way too verbose, keep it short.",
         "This description is too long, can you trim it?",
         "Too wordy. Be concise.",
@@ -231,6 +239,12 @@ class TestVerbosityTopic(unittest.TestCase):
         ("感覺距離其他節點可以短一點點", "a layout gap"),
         ("用條列式，要完整，但不囉唆", "a qualifier on a request"),
         ("類似工具書 step by step 那種（但不要冗長）", "a qualifier on a request"),
+        ("用 eli5-html，但不要太冗長", "a qualifier on a request, with 太"),
+        ("可以再白話一點解釋嗎？（但不是要你寫的落落長）", "a qualifier with words in between"),
+        ("shot2 我覺得太多餘，只有 15s 還要浪費", "a screenshot, not prose"),
+        ("不是「冗餘」而是「缺欄」，與本批修法不同形狀", "冗餘 as a redundant field in code"),
+        ("這兩個 enum case 是冗餘的，合併吧", "冗餘 as duplicate code"),
+        ("本機操作+單人開發，有點多餘", "a process step, not prose"),
         ("run it with the verbose flag", "a CLI flag"),
         ("the timeout is too long, bump it down", "a timeout"),
         ("add padding to the container", "CSS"),
@@ -255,6 +269,12 @@ class TestVerbosityTopic(unittest.TestCase):
     def test_a_question_does_not_hide_a_verbosity_complaint(self):
         """「可以簡短一點嗎？」 is a correction phrased politely."""
         hit = cues.find_cue("太長了，可以簡短一點嗎？")
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit.topic, cues.VERBOSITY)
+
+    def test_a_qualifier_clause_only_blanks_itself(self):
+        """The complaint before 但 survives; only the 但不… clause is removed."""
+        hit = cues.find_cue("你寫得太冗長了，但不要刪掉範例")
         self.assertIsNotNone(hit)
         self.assertEqual(hit.topic, cues.VERBOSITY)
 

@@ -59,6 +59,9 @@ class TopicCues:
 
     name: str
     patterns: tuple[str, ...]
+    #: Clauses blanked out before `patterns` run. 「要完整，但不囉唆」 and
+    #: 「但不是要你寫的落落長」 qualify a request; they do not correct an answer.
+    qualifiers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -125,6 +128,14 @@ class CuePack:
             ]
         return self._compiled[key]
 
+    def _without_qualifiers(self, topic: TopicCues, text: str) -> str:
+        key = ("qualifiers", topic.name, topic.qualifiers)
+        if key not in self._compiled:
+            self._compiled[key] = [re.compile(pattern, re.MULTILINE) for pattern in topic.qualifiers]
+        for pattern in self._compiled[key]:
+            text = pattern.sub(" ", text)
+        return text
+
     def match(self, text: str) -> CueHit | None:
         if not text or self.guarded(text):
             return None
@@ -132,8 +143,9 @@ class CuePack:
 
         if length <= self.strong_gate:
             for topic in self.topics:
+                stripped = self._without_qualifiers(topic, text)
                 for cue, pattern in zip(topic.patterns, self._topic_patterns(topic)):
-                    if pattern.search(text):
+                    if pattern.search(stripped):
                         return CueHit(pack=self.name, cue=cue, strength=STRONG, topic=topic.name)
             for cue, pattern in zip(self.strong, self._patterns(self.strong)):
                 if pattern.search(text):
@@ -173,10 +185,13 @@ class CuePack:
 
 def _merge_topics(base: tuple[TopicCues, ...], extra: dict) -> tuple[TopicCues, ...]:
     """Config `topics` extends a built-in topic's patterns or adds a new topic."""
-    merged = {topic.name: topic.patterns for topic in base}
+    merged = {topic.name: topic for topic in base}
     for name, patterns in extra.items():
-        merged[name] = merged.get(name, ()) + tuple(patterns)
-    return tuple(TopicCues(name=name, patterns=patterns) for name, patterns in merged.items())
+        current = merged.get(name, TopicCues(name=name, patterns=()))
+        merged[name] = TopicCues(
+            name=name, patterns=current.patterns + tuple(patterns), qualifiers=current.qualifiers
+        )
+    return tuple(merged.values())
 
 
 VERBOSITY = "verbosity"
@@ -189,21 +204,30 @@ _EN_PROSE = (
     "explanation|section|body|docstring|commit message|pr description"
 )
 _EN_SHORTEN = "shorter|shorten|concise|brief|trim|cut it|condense|tighten|tl;?dr"
-#: 「要完整，但不囉唆」 qualifies a request; it does not correct an answer.
-_ZH_NOT_QUALIFIER = r"(?<!但不)(?<!但不要)(?<!但不用)"
 
 VERBOSITY_ZH = TopicCues(
     name=VERBOSITY,
+    # A 但不… / 但別… clause runs to the next punctuation mark.
+    qualifiers=(r"但(?:不|別)[^，。！？；）)\n]*",),
     patterns=(
-        "冗詞",
-        "贅字",
-        "贅詞",
-        _ZH_NOT_QUALIFIER + "冗長",
-        _ZH_NOT_QUALIFIER + "囉唆",
-        _ZH_NOT_QUALIFIER + "囉嗦",
-        _ZH_NOT_QUALIFIER + "廢話",
-        _ZH_NOT_QUALIFIER + "鋪陳",
+        # 冗於 is an observed typo for 冗餘. 冗餘 itself is left out of this list:
+        # in a code discussion it means a redundant field, not redundant prose.
+        r"冗[長詞句言贅於]",
+        r"冗[餘余]的?(?:內容|文字|句子|段落|說明|描述|註解)",
+        r"(?:內容|文字|句子|段落|說明|描述|註解).{0,6}?冗[餘余]",
+        r"贅[字詞述言]|累贅",
+        "囉唆",
+        "囉嗦",
+        "啰嗦",
+        "廢話",
+        "鋪陳",
         "長篇大論",
+        "落落長",
+        "嘮叨",
+        "拖泥帶水",
+        "廢字",
+        # 多餘 only about a unit of prose: 「shot2 太多餘」 is a screenshot.
+        r"(?:句|段|行|註解|說明|描述|提示|comment).{0,10}?多餘",
         "太長一段",
         "簡短一點",
         r"不夠(?:白話|簡潔|精簡)",
@@ -222,6 +246,8 @@ VERBOSITY_EN = TopicCues(
         r"\b(?:too|so|very|overly|way too) (?:verbose|wordy|long-winded)\b",
         r"\b(?:wordy|long-winded)\b",
         r"\bwall of text\b",
+        r"\brambling\b",
+        r"\btoo much detail\b",
         r"\btoo much (?:text|prose|fluff|filler)\b",
         # "make it shorter" is left out on purpose: like 短一點 it is as often
         # about a UI element or an injected block as about the agent's prose.
