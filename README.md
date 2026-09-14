@@ -23,13 +23,13 @@ Plus a closing half: a scheduled headless triage pass (`pi -p` with a read-only 
 ## Install
 
 ```bash
-uv tool install git+https://github.com/ohlulu/pi-self-improvement@v0.1.0
+uv tool install git+https://github.com/ohlulu/pi-self-improvement@v0.1.1
 ```
 
 Or with pipx, if that is what you already have:
 
 ```bash
-pipx install git+https://github.com/ohlulu/pi-self-improvement@v0.1.0
+pipx install git+https://github.com/ohlulu/pi-self-improvement@v0.1.1
 ```
 
 Either one puts a single `pi-self-improvement` command on your PATH inside its own environment. There is nothing to resolve — the package is standard library only.

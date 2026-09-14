@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pi-self-improvement"
-version = "0.1.0"
+version = "0.1.1"
 description = "Mine pi session transcripts for recurring friction and stage approval-gated fix proposals"
 readme = "README.md"
 license = { file = "LICENSE" }
