@@ -18,6 +18,15 @@ Two ideas keep precision up:
 - **Guards.** A pack may list phrases that make the whole message ineligible.
   沒錯 ("that's right") contains 錯 ("wrong") and would otherwise read as a
   correction.
+
+A third idea keeps *recall* up for one class of correction the first two miss:
+
+- **Topics.** Some corrections are about how the agent writes, not what it did:
+  「冗詞贅字太多」, "too wordy". None of the strong cues above appear in them,
+  and they are often phrased as questions (「可以簡短一點嗎？」), so the
+  interrogative guard would drop the ones that do carry a weak cue. A topic is
+  a regex set that names the complaint; a hit is as strong as a strong cue and
+  carries the topic name so routing can group it across projects.
 """
 
 from __future__ import annotations
@@ -34,6 +43,22 @@ class CueHit:
     pack: str
     cue: str
     strength: str
+    #: Set when a topic cue matched — names what the user objected to.
+    topic: str | None = None
+
+
+@dataclass(frozen=True)
+class TopicCues:
+    """Regexes naming one kind of complaint, e.g. `verbosity`.
+
+    Regexes rather than substrings because the ambiguous words need context:
+    太長 ("too long") is a layout complaint about a kitty tab, a timeout or a
+    branch just as often as it is about prose, so it only counts next to a
+    prose noun or a request to shorten.
+    """
+
+    name: str
+    patterns: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -57,6 +82,8 @@ class CuePack:
     #: 為什麼你 and "why did you" are strong cues that are themselves questions,
     #: so a blanket guard would delete two rows of the DEC-008 table.
     interrogatives: tuple[str, ...] = ()
+    #: Checked before strong cues, within the strong gate, never interrogative-guarded.
+    topics: tuple[TopicCues, ...] = ()
 
     _compiled: dict = field(default_factory=dict, compare=False, repr=False)
     _interrogative: list = field(default_factory=list, compare=False, repr=False)
@@ -90,12 +117,24 @@ class CuePack:
             )
         return any(pattern.search(text) for pattern in self._interrogative)
 
+    def _topic_patterns(self, topic: TopicCues) -> list[re.Pattern]:
+        key = ("topic", topic.name, topic.patterns)
+        if key not in self._compiled:
+            self._compiled[key] = [
+                re.compile(pattern, re.IGNORECASE | re.MULTILINE) for pattern in topic.patterns
+            ]
+        return self._compiled[key]
+
     def match(self, text: str) -> CueHit | None:
         if not text or self.guarded(text):
             return None
         length = len(text)
 
         if length <= self.strong_gate:
+            for topic in self.topics:
+                for cue, pattern in zip(topic.patterns, self._topic_patterns(topic)):
+                    if pattern.search(text):
+                        return CueHit(pack=self.name, cue=cue, strength=STRONG, topic=topic.name)
             for cue, pattern in zip(self.strong, self._patterns(self.strong)):
                 if pattern.search(text):
                     return CueHit(pack=self.name, cue=cue, strength=STRONG)
@@ -111,7 +150,13 @@ class CuePack:
                     return CueHit(pack=self.name, cue=cue, strength=WEAK)
         return None
 
-    def extend(self, strong: tuple[str, ...] = (), weak: tuple[str, ...] = (), guards: tuple[str, ...] = ()):
+    def extend(
+        self,
+        strong: tuple[str, ...] = (),
+        weak: tuple[str, ...] = (),
+        guards: tuple[str, ...] = (),
+        topics: dict | None = None,
+    ):
         return CuePack(
             name=self.name,
             strong=self.strong + tuple(strong),
@@ -122,7 +167,70 @@ class CuePack:
             word_boundary=self.word_boundary,
             line_anchored_weak=self.line_anchored_weak,
             interrogatives=self.interrogatives,
+            topics=_merge_topics(self.topics, topics or {}),
         )
+
+
+def _merge_topics(base: tuple[TopicCues, ...], extra: dict) -> tuple[TopicCues, ...]:
+    """Config `topics` extends a built-in topic's patterns or adds a new topic."""
+    merged = {topic.name: topic.patterns for topic in base}
+    for name, patterns in extra.items():
+        merged[name] = merged.get(name, ()) + tuple(patterns)
+    return tuple(TopicCues(name=name, patterns=patterns) for name, patterns in merged.items())
+
+
+VERBOSITY = "verbosity"
+
+#: Prose nouns that disambiguate 太長 / "too long" from layout, time and git.
+_ZH_PROSE = "回覆|文案|描述|說明|段|句子|comment|註解|規則|description|body|summary|摘要|報告|文件"
+_ZH_SHORTEN = "短一點|簡短|精簡|簡潔|簡化|剪短|挑重點|講重點|說重點|有必要嗎|多餘|不用這麼|不需要這麼"
+_EN_PROSE = (
+    "reply|response|answer|description|comment|summary|message|paragraph|copy|prose|"
+    "explanation|section|body|docstring|commit message|pr description"
+)
+_EN_SHORTEN = "shorter|shorten|concise|brief|trim|cut it|condense|tighten|tl;?dr"
+#: 「要完整，但不囉唆」 qualifies a request; it does not correct an answer.
+_ZH_NOT_QUALIFIER = r"(?<!但不)(?<!但不要)(?<!但不用)"
+
+VERBOSITY_ZH = TopicCues(
+    name=VERBOSITY,
+    patterns=(
+        "冗詞",
+        "贅字",
+        "贅詞",
+        _ZH_NOT_QUALIFIER + "冗長",
+        _ZH_NOT_QUALIFIER + "囉唆",
+        _ZH_NOT_QUALIFIER + "囉嗦",
+        _ZH_NOT_QUALIFIER + "廢話",
+        _ZH_NOT_QUALIFIER + "鋪陳",
+        "長篇大論",
+        "太長一段",
+        "簡短一點",
+        r"不夠(?:白話|簡潔|精簡)",
+        r"保持(?:簡潔|精簡)",
+        r"精簡一(?:下|點)",
+        r"不(?:用|需要|必)(?:這麼|那麼)長",
+        r"太(?:多|複雜)的?(?:字|描述|說明|換行)",
+        rf"太長.{{0,40}}?(?:{_ZH_SHORTEN})",
+        rf"(?:{_ZH_PROSE}).{{0,20}}?太長",
+    ),
+)
+
+VERBOSITY_EN = TopicCues(
+    name=VERBOSITY,
+    patterns=(
+        r"\b(?:too|so|very|overly|way too) (?:verbose|wordy|long-winded)\b",
+        r"\b(?:wordy|long-winded)\b",
+        r"\bwall of text\b",
+        r"\btoo much (?:text|prose|fluff|filler)\b",
+        # "make it shorter" is left out on purpose: like 短一點 it is as often
+        # about a UI element or an injected block as about the agent's prose.
+        r"\b(?:be|keep it) (?:more )?(?:concise|brief|short|terse)\b",
+        r"\bshorten (?:it|this|that)\b",
+        rf"\btoo long\b.{{0,40}}?\b(?:{_EN_SHORTEN})\b",
+        rf"\b(?:{_EN_PROSE})\b.{{0,20}}?\btoo long\b",
+    ),
+)
 
 
 EN = CuePack(
@@ -142,6 +250,7 @@ EN = CuePack(
     weak=("instead", "don't do", "do not", "should have"),
     line_anchored_weak=("actually",),
     interrogatives=(r"\?\s*$",),
+    topics=(VERBOSITY_EN,),
     strong_gate=2000,
     weak_gate=400,
     word_boundary=True,
@@ -156,6 +265,7 @@ ZH_HANT = CuePack(
     interrogatives=(r"[?？]\s*$", r"嗎[?？]?\s*$", r"呢[?？]?\s*$", r"吧[?？]\s*$", r"^\s*(?:想問|請問)"),
     # Chinese carries roughly twice the information per character, so the gates
     # are tighter than the English ones for the same amount of meaning.
+    topics=(VERBOSITY_ZH,),
     strong_gate=1000,
     weak_gate=150,
     word_boundary=False,
@@ -177,6 +287,7 @@ def build_packs(overrides: dict | None = None) -> tuple[CuePack, ...]:
                 strong=tuple(settings.get("strong", ())),
                 weak=tuple(settings.get("weak", ())),
                 guards=tuple(settings.get("guards", ())),
+                topics=settings.get("topics"),
             )
         )
     for name, settings in overrides.items():
@@ -191,6 +302,7 @@ def build_packs(overrides: dict | None = None) -> tuple[CuePack, ...]:
                 strong_gate=int(settings.get("strong_gate", 2000)),
                 weak_gate=int(settings.get("weak_gate", 400)),
                 word_boundary=bool(settings.get("word_boundary", True)),
+                topics=_merge_topics((), settings.get("topics") or {}),
             )
         )
     return tuple(packs)

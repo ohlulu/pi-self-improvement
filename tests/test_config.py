@@ -125,6 +125,20 @@ class TestCuePackOverrides(ConfigTestCase):
         for cue in builtin.strong:
             self.assertIn(cue, pack.strong)
 
+    def test_a_topic_can_be_extended(self):
+        config = Config.from_dict({"cue_packs": {"en": {"topics": {"verbosity": [r"\byapping\b"]}}}})
+        pack = next(pack for pack in config.detect.cue_packs if pack.name == "en")
+        verbosity = next(topic for topic in pack.topics if topic.name == cues.VERBOSITY)
+
+        self.assertIn(r"\byapping\b", verbosity.patterns)
+        self.assertGreater(len(verbosity.patterns), 1, "builtin patterns kept")
+
+    def test_a_bad_topic_regex_is_refused(self):
+        with self.assertRaises(ConfigError) as caught:
+            Config.from_dict({"cue_packs": {"en": {"topics": {"verbosity": ["(unclosed"]}}}})
+
+        self.assertIn("not a regex", str(caught.exception))
+
     def test_an_unknown_pack_is_refused(self):
         with self.assertRaises(ConfigError) as caught:
             Config.from_dict({"cue_packs": {"klingon": {"strong": ["nope"]}}})

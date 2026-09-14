@@ -169,6 +169,17 @@ def _validate(payload: dict) -> None:
             )
         if not isinstance(settings, dict):
             raise ConfigError(f"cue_packs.{name} must be an object")
+        topics = settings.get("topics", {})
+        if not isinstance(topics, dict):
+            raise ConfigError(f"cue_packs.{name}.topics must map a topic name to a list of regexes")
+        for topic, patterns in topics.items():
+            for pattern in patterns:
+                try:
+                    re.compile(pattern)
+                except re.error as error:
+                    raise ConfigError(
+                        f"cue_packs.{name}.topics.{topic}: {pattern!r} is not a regex: {error}"
+                    )
 
 
 def _suggest(key: str) -> str:

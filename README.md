@@ -112,7 +112,7 @@ Optional, at `<output-root>/config.json`. Defaults are deliberately generic: any
 | `extra_session_roots` | list | Extra directories of pi transcripts, scanned in addition to the default. |
 | `tracked_clis` | list | CLIs whose failures and retries you care about. |
 | `tracked_cli_suffix` | list | Suffix rule for the same, default `["-cli"]`. |
-| `cue_packs` | object | Enable, disable or extend correction cue packs (`en`, `zh-Hant`). |
+| `cue_packs` | object | Enable, disable or extend correction cue packs (`en`, `zh-Hant`): `strong`, `weak`, `guards`, and `topics` (regexes naming a style complaint, e.g. `verbosity`). |
 | `extra_scaffold_markers` | list | Extra markers identifying injected scaffold text. |
 | `extra_redaction_patterns` | list | Additional secret shapes to mask; compiled at load. |
 | `ext_family_map` | object | Override how flat tool names group into `ext:<family>`. |
@@ -127,7 +127,9 @@ Optional, at `<output-root>/config.json`. Defaults are deliberately generic: any
 {
   "tracked_clis": ["my-deploy-tool"],
   "extra_backlog_ignore": ["cat", "sed"],
-  "cue_packs": { "en": { "strong": ["that is backwards"] } }
+  "cue_packs": {
+    "en": { "strong": ["that is backwards"], "topics": { "verbosity": ["\\byapping\\b"] } }
+  }
 }
 ```
 

@@ -45,6 +45,11 @@ A single observed occurrence backing a proposal, pinned to where in a transcript
 happened.
 _Avoid_: sample, instance, occurrence
 
+**Topic**:
+What a correction objects to when it is about the agent's writing rather than its
+actions (`verbosity`). Carried on the evidence and used as the target instead of the repo.
+_Avoid_: category, style tag, complaint type
+
 **Proposal**:
 A staged, human-approvable suggestion to fix one target. Never applied automatically.
 _Avoid_: finding, suggestion, recommendation

@@ -83,6 +83,9 @@ Make the change by hand, in the smallest form that addresses the evidence:
 - `tool:ext:<family>` — the extension's tool descriptions or error handling
 - `skill_improvement:<skill>` — the skill body that failed to prevent the correction
 - `memory_context:<repo>` — that repo's `AGENTS.md` or project docs
+- `memory_context:style:<topic>` — a complaint about how the agent writes
+  (`verbosity`), collected across every repo and skill; the fix is a rule in
+  the global instruction file, not a per-project note
 - `backlog:<executable>` — usually an upstream bug or a missing wrapper; often
   the right fix is `extra_backlog_ignore` in config
 

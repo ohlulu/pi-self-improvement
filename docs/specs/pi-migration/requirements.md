@@ -83,11 +83,13 @@ WHEN a read tool call targets a path ending in `SKILL.md`, the system SHALL reco
 
 ### REQ-010: Bilingual correction detection
 
-WHEN a user message matches a correction cue pack, the system SHALL record correction evidence；strong cues 於一般長度訊息有效、weak cues 僅於短反應式訊息有效；內建 English 與 Traditional Chinese cue packs，config MAY 擴充。
+WHEN a user message matches a correction cue pack, the system SHALL record correction evidence；strong cues 於一般長度訊息有效、weak cues 僅於短反應式訊息有效；內建 English 與 Traditional Chinese cue packs，config MAY 擴充。每個 pack 另 MAY 定義 topic cues：以 regex 命名一類「針對寫法而非做法」的 correction（內建 `verbosity`），命中時視同 strong cue、不受問句 guard 影響，且 evidence 帶有 topic 名稱。
 
 - AC-016: GIVEN assistant 已回應過 WHEN user 送出短訊息「不對，我是說要用 X」 THEN 產生 correction evidence
 - AC-017: GIVEN user 貼上長篇文件內含 "use X instead" 且超過 weak-cue 長度閘門 WHEN 偵測 THEN 不產生 correction
 - AC-018: GIVEN 訊息「沒錯，就這樣做」 WHEN 偵測 THEN 不產生 correction（negative guard）
+- AC-053: GIVEN 訊息「太長了，可以簡短一點嗎？」或「冗詞贅字一大堆」 WHEN 偵測 THEN 產生 topic 為 `verbosity` 的 correction evidence，問句形式不影響
+- AC-054: GIVEN 「太長」指的是 tab 標題、timeout、branch 或 UI 排版，或「但不囉唆」作為指令的限定語 WHEN 偵測 THEN 不產生 `verbosity` topic
 
 ### REQ-011: Scaffold filtering
 
@@ -111,7 +113,7 @@ The system SHALL route each proposal to exactly one of `tool`、`skill_improveme
 |-------|--------|
 | `tool` | tracked executable basename，或 extension tool 的 `ext:<family>` |
 | `skill_improvement` | skill 名稱 |
-| `memory_context` | repository root |
+| `memory_context` | repository root；帶 topic 的 correction 則為 `style:<topic>`，跨 repo、跨 skill 共用 |
 | `backlog` | 正規化後的 executable 名稱 |
 
 Target 正規化：realpath 解 symlink → git toplevel → 保留原大小寫；無法判定時為 `<unknown>`（見 ADR-0005）。
@@ -120,6 +122,7 @@ Target 正規化：realpath 解 symlink → git toplevel → 保留原大小寫�
 - AC-023: GIVEN correction 未關聯任何 skill WHEN routing THEN 產生依 repository root 分組的 `memory_context` proposal，且單一 session 最多貢獻 `MAX_CORRECTIONS_PER_SESSION`（預設 3）個
 - AC-024: GIVEN 跨 session 重複的一般工具 failure WHEN routing THEN 產生 `backlog` proposal
 - AC-046: GIVEN 同一 repo 的主目錄與其 git worktree 各自出現 correction WHEN routing THEN 兩者歸入同一個 `memory_context` target
+- AC-055: GIVEN 不同 repo、或 skill invocation 之後出現的 `verbosity` topic correction WHEN routing THEN 全部歸入 `memory_context:style:verbosity`，不依 repo 或 skill 分散
 
 ### REQ-014: Extension-tool family grouping
 

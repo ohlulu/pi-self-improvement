@@ -559,7 +559,13 @@ def _detect_corrections(
                     session_id=redactor.text(summary.session_id or "") or None,
                     origin=summary.origin,
                 ),
-                detail={"pack": hit.pack, "cue": hit.cue, "strength": hit.strength, "cwd": summary.cwd},
+                detail={
+                    "pack": hit.pack,
+                    "cue": hit.cue,
+                    "strength": hit.strength,
+                    "topic": hit.topic,
+                    "cwd": summary.cwd,
+                },
             )
         )
     return signals

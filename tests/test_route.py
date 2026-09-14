@@ -64,6 +64,35 @@ class TestFourRoutes(RouteTestCase):
         self.assertEqual(len(proposals), 1)
         self.assertEqual(proposals[0].route, route.ROUTE_MEMORY)
 
+    def test_a_verbosity_correction_targets_the_topic_not_the_repo(self):
+        """AC-055: split by cwd, a cross-project style complaint never recurs."""
+        keys = self.keys(
+            signal(detect.CORRECTION, "/tmp/x", session="s1", line=9, cwd="/tmp/x", topic="verbosity"),
+            signal(detect.CORRECTION, "/tmp/y", session="s2", line=9, cwd="/tmp/y", topic="verbosity"),
+        )
+
+        self.assertEqual(keys, ["memory_context:style:verbosity"])
+
+    def test_a_verbosity_correction_outranks_a_loaded_skill(self):
+        """The same complaint lands under every skill; the fix is a global rule."""
+        proposals = self.build(
+            signal(detect.SKILL, "sample-skill", line=4),
+            signal(detect.CORRECTION, "/tmp/x", line=9, cwd="/tmp/x", topic="verbosity"),
+        )
+
+        self.assertEqual([p.key for p in proposals], ["memory_context:style:verbosity"])
+        self.assertIn("verbosity", proposals[0].summary)
+
+    def test_a_topic_correction_still_counts_toward_the_session_cap(self):
+        proposals = self.build(
+            *[
+                signal(detect.CORRECTION, "/tmp/x", line=line, cwd="/tmp/x", topic="verbosity")
+                for line in range(10, 20)
+            ]
+        )
+
+        self.assertEqual(len(proposals[0].signals), route.MAX_CORRECTIONS_PER_SESSION)
+
     def test_a_tracked_cli_failure_becomes_a_tool_proposal(self):
         """AC-011 through routing."""
         keys = self.keys(signal(detect.FAILURE, "demo-cli", tool="bash", tracked=True))

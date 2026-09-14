@@ -28,6 +28,9 @@ ROUTES = (ROUTE_TOOL, ROUTE_SKILL, ROUTE_MEMORY, ROUTE_BACKLOG)
 
 UNKNOWN_TARGET = "<unknown>"
 EXT_PREFIX = "ext:"
+#: A topic correction ("too wordy") is about how the agent writes everywhere,
+#: so its target is the topic, not the repo: split by cwd it would never recur.
+STYLE_PREFIX = "style:"
 
 #: AC-023: one noisy session must not fill the packet on its own.
 MAX_CORRECTIONS_PER_SESSION = 3
@@ -238,6 +241,11 @@ def _route_correction(
         return None
     corrections_seen[session] += 1
 
+    topic = signal.detail.get("topic")
+    if topic:
+        # The global instruction file is the fix even when a skill was loaded:
+        # the same complaint lands under every skill and every repo.
+        return (ROUTE_MEMORY, STYLE_PREFIX + topic)
     skill = _skill_before(skills.get(session, ()), signal.evidence.line)
     if skill:
         # AC-022: the skill was loaded and the user still had to correct it.
@@ -289,6 +297,12 @@ def summarize(proposal: Proposal, redactor: Redactor) -> str:
         return (
             f"`{target}` was loaded, then the user corrected the result "
             f"{kinds[CORRECTION]} time(s) across {sessions} session(s)"
+        )
+    if proposal.route == ROUTE_MEMORY and target.startswith(STYLE_PREFIX):
+        return (
+            f"the user pushed back on {target[len(STYLE_PREFIX):]} "
+            f"{kinds[CORRECTION]} time(s) across {sessions} session(s); "
+            "a cross-project writing rule is the likely fix"
         )
     if proposal.route == ROUTE_MEMORY:
         return (

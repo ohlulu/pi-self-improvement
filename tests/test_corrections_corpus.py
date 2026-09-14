@@ -185,6 +185,90 @@ class TestQuestionsAreNotCorrections(unittest.TestCase):
                 self.assertIsNotNone(cues.find_cue(text), f"lost a real correction: {text}")
 
 
+class TestVerbosityTopic(unittest.TestCase):
+    """Corrections about how the agent writes, not what it did.
+
+    Every positive here is the shape of a message observed in the author's
+    transcripts on two machines — the "your prose is too long" complaint was the
+    single most frequent correction the strong/weak packs missed entirely
+    (1 of 15 caught, and that one by accident on 我的意思是). The negatives are
+    the observed false-positive shapes: 太長 about a kitty tab, a timeout, a
+    branch, a UI title, a layout gap, and a request for short copy that is an
+    instruction rather than a correction.
+    """
+
+    VERBOSITY = [
+        "你的回覆會不會太冗長了，可以剪短一點嗎？",
+        "整篇廢話太多，我改了一下清爽多了",
+        "好像都太長了，我希望短一點，不用鋪陳太多",
+        "description 不用這麼長，只要精簡就可以了",
+        "comment 2 & 3 都太長了，不像真人",
+        "太長了，應該不用這麼複雜的描述吧？你覺得呢？",
+        "太長了，太簡單或常識的內容就不用寫了，挑重點",
+        "你補了太長一段了吧？有必要嗎",
+        "你寫的太過複雜，冗詞贅字一大堆",
+        "我覺得不夠白話簡潔，你再修正一版",
+        "為什麼你廢話這麼多",
+        "感覺可以精簡一下？",
+        "我發現你的冗詞很多，一件簡單的事你可以拆成兩三句說明",
+        "你剛剛寫的規則太長了，我只要一行就好",
+        "有些太冗長了",
+        "太長了，可以簡短一點嗎？",
+        "你前面太多字眼我看不懂",
+        "Your reply is way too verbose, keep it short.",
+        "This description is too long, can you trim it?",
+        "Too wordy. Be concise.",
+    ]
+
+    NOT_VERBOSITY = [
+        ("kitty tab 可以改成只顯示 folder name 嗎？不然太長了", "a tab title"),
+        ("90s 太長了，我已經執行完了", "a timeout"),
+        ("太長了吧，同事只花了 4d", "an estimate"),
+        ("我覺得 branch -3 太長了，你按照場景描述給我有哪些修改", "a branch"),
+        ("title 太長了，會擠壓到 content，調整一下 title", "a UI title"),
+        ("當文字內容太長的時候，列表會跑版", "a layout bug"),
+        ("幫我想一段簡短的文案", "an instruction for short copy"),
+        ("感覺距離其他節點可以短一點點", "a layout gap"),
+        ("用條列式，要完整，但不囉唆", "a qualifier on a request"),
+        ("類似工具書 step by step 那種（但不要冗長）", "a qualifier on a request"),
+        ("run it with the verbose flag", "a CLI flag"),
+        ("the timeout is too long, bump it down", "a timeout"),
+        ("add padding to the container", "CSS"),
+    ]
+
+    def test_verbosity_complaints_carry_the_topic(self):
+        for text in self.VERBOSITY:
+            with self.subTest(text=text):
+                hit = cues.find_cue(text)
+                self.assertIsNotNone(hit, f"missed a verbosity correction: {text}")
+                self.assertEqual(hit.topic, cues.VERBOSITY)
+                self.assertEqual(hit.strength, cues.STRONG)
+
+    def test_too_long_about_something_other_than_prose_is_not_verbosity(self):
+        for text, why in self.NOT_VERBOSITY:
+            with self.subTest(why=why):
+                hit = cues.find_cue(text)
+                self.assertTrue(
+                    hit is None or hit.topic is None, f"false verbosity ({why}): {text} -> {hit}"
+                )
+
+    def test_a_question_does_not_hide_a_verbosity_complaint(self):
+        """「可以簡短一點嗎？」 is a correction phrased politely."""
+        hit = cues.find_cue("太長了，可以簡短一點嗎？")
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit.topic, cues.VERBOSITY)
+
+    def test_a_guard_still_vetoes_a_verbosity_complaint(self):
+        self.assertIsNone(cues.find_cue("沒錯，不過太長了可以簡短一點"))
+
+    def test_a_topic_hit_wins_over_a_strong_cue(self):
+        hit = cues.find_cue("不對，太冗長了")
+        self.assertEqual(hit.topic, cues.VERBOSITY)
+
+    def test_a_plain_correction_has_no_topic(self):
+        self.assertIsNone(cues.find_cue("不對，我是說要用 release 子指令。").topic)
+
+
 class TestPackConfiguration(unittest.TestCase):
     """REQ-019: packs are extensible and disableable from config."""
 
@@ -204,6 +288,17 @@ class TestPackConfiguration(unittest.TestCase):
     def test_a_new_language_pack_can_be_added(self):
         packs = cues.build_packs({"de": {"strong": ["das ist falsch"], "strong_gate": 500}})
         self.assertIsNotNone(cues.find_cue("Das ist falsch, bitte anders.", packs))
+
+    def test_a_topic_can_be_extended(self):
+        packs = cues.build_packs({"en": {"topics": {"verbosity": [r"\byapping\b"]}}})
+        hit = cues.find_cue("Stop yapping and give me the diff.", packs)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit.topic, cues.VERBOSITY)
+        self.assertIsNotNone(cues.find_cue("Too wordy.", packs), "builtin topic patterns kept")
+
+    def test_a_new_topic_can_be_added(self):
+        packs = cues.build_packs({"en": {"topics": {"tone": [r"\btoo formal\b"]}}})
+        self.assertEqual(cues.find_cue("This reads too formal.", packs).topic, "tone")
 
 
 class TestCorrectionSignals(unittest.TestCase):
@@ -237,6 +332,14 @@ class TestCorrectionSignals(unittest.TestCase):
         self.assertEqual(signals[0].detail["pack"], "zh-Hant")
         self.assertEqual(signals[0].evidence.line, 3)
         self.assertEqual(signals[0].subject, "/tmp/pi-fixtures/beta")
+
+    def test_a_verbosity_correction_carries_its_topic(self):
+        summary = self.session((3, "太長了，可以簡短一點嗎？"))
+
+        signals = self.corrections(summary)
+
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0].detail["topic"], cues.VERBOSITY)
 
     def test_the_opening_message_is_never_a_correction(self):
         """Nothing has been answered yet, so there is nothing to correct."""

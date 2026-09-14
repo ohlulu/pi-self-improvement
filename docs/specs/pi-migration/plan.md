@@ -80,6 +80,8 @@ read_when:
 | `zh-Hant` | 不對 / 不是這樣 / 你搞錯 / 我是說 / 我的意思是 / 為什麼你 / 你應該先 / 記住 | 應該 / 改成 / 不要 / 直接 / 重來 | strong 1000 / weak 150 | 沒錯 / 不錯 / 沒問題 / 還不錯 |
 
 CJK cue 以 substring + guard 比對（不用 `\b`，漢字無詞界）；guard 命中則整句跳過。閘門初始值反映中文約 2 倍的資訊密度，由 corpus test 迭代校準。
+
+第三類 cue 是 **topic**：每個 pack 可帶一組以 regex 命名的「寫法投訴」，內建 `verbosity`。兩台機器的語料顯示「你寫太長」是 strong/weak 兩層完全漏掉的最高頻 correction（15 則只中 1，還是靠 我的意思是 誤中）：它用的詞（冗詞、贅字、廢話、鋪陳、囉唆、too wordy）不在 strong 表裡，而且常以問句出現（「可以簡短一點嗎？」），會被問句 guard 同仁挖掉。Topic cue 在 strong gate 內優先比對、不受問句 guard 影響；用 regex 是因為歧義詞需要上下文：「太長」只有在 prose 名詞（回覆、描述、comment）旁邊或接著要求縮短（簡短、精簡、挑重點）時才算，否則 kitty tab、timeout、branch、UI title 的「太長」全部誤中；「但不囉唆」這種指令限定語以 lookbehind 排除。Routing 上 topic correction 不依 cwd 分組而是全部進 `memory_context:style:<topic>`（見 REQ-013），否則同一個跨專案投訴散在 11 個 repo 各一次，永遠不會成為 recurring。
 **Alternatives**: 單一混語 regex——英文 `\b` 語義與中文 substring 語義混在一條 pattern 裡無法各自調精度。
 **Rationale**: 作者語料 85% user 訊息含 CJK，上游英文 cue 在 400 sessions 只命中 2 次且皆為 false positive——bilingual 是這次重寫的核心價值，pack 抽象讓其他語言可後續加入。
 **Satisfies**: REQ-010
