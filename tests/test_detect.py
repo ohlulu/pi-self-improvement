@@ -178,6 +178,53 @@ class TestStatusAsAnswer(DetectTestCase):
 
         self.assertEqual(len(self.only(summary, detect.FAILURE)), 1)
 
+    def failures(self, command, result):
+        return self.only(
+            session(call(command=command, result=result, is_error=True, exit_code=1)),
+            detect.FAILURE,
+        )
+
+    def test_a_search_finding_nothing_after_earlier_output_is_not_a_failure(self):
+        """AC-057: the status is the last command's. The first `rg` printed a match,
+        so an empty-output requirement filed the second one's "no match" as `rg`
+        friction."""
+        self.assertEqual(
+            self.failures(
+                'rg -n "infoCircle" Icons.swift; rg -n "static let info" Color.swift',
+                "71: public static let infoCircle\nCommand exited with code 1",
+            ),
+            [],
+        )
+
+    def test_a_counting_grep_ending_the_line_is_not_a_failure(self):
+        self.assertEqual(
+            self.failures(
+                "make test | grep -E 'FAILED'; trash Probe.swift; ls Build/ | grep -c png",
+                "** TEST SUCCEEDED **\n0\nCommand exited with code 1",
+            ),
+            [],
+        )
+
+    def test_a_search_behind_cd_is_still_an_answer(self):
+        self.assertEqual(self.failures("cd repo && rg needle src", "(no output)"), [])
+
+    def test_a_search_after_a_real_program_in_an_and_chain_is_a_failure(self):
+        """AC-057: in `make build && rg x`, a status of 1 may be make's."""
+        self.assertEqual(len(self.failures("make build && rg needle src", "(no output)")), 1)
+
+    def test_pipefail_makes_a_filtering_grep_uncertain(self):
+        """With pipefail, `make build | grep x` failing with 1 may be make's."""
+        self.assertEqual(
+            len(self.failures("set -o pipefail; make build | grep warning", "(no output)")), 1
+        )
+
+    def test_the_searchs_own_diagnostic_in_a_sequence_is_a_failure(self):
+        failures = self.failures(
+            "ls; grep needle /nope", "a.txt\ngrep: /nope: No such file or directory"
+        )
+
+        self.assertEqual([signal.subject for signal in failures], ["grep"])
+
     def test_a_worse_exit_code_from_a_search_tool_is_a_failure(self):
         summary = session(
             call(command="grep -r needle src", result="(no output)", is_error=True, exit_code=2)
@@ -863,6 +910,41 @@ class TestAttributionGuards(unittest.TestCase):
 
     def test_a_backslash_continuation_stays_one_command(self):
         self.assertEqual(detect.executable_of("demo-cli run \\\n  --flag x"), "demo-cli")
+
+    def test_the_last_sequential_command_is_the_program(self):
+        """AC-056: the shell reports the status of `a; b` as b's. Naming the first
+        program filed an `ls` of a just-trashed directory as `trash` friction."""
+        self.assertEqual(
+            detect.executable_of("trash snaps && make test | grep FAILED; ls snaps"), "ls"
+        )
+
+    def test_a_hang_is_attributed_to_the_last_sequential_command(self):
+        command = (
+            "cd skill && trash .venv.next 2>/dev/null; "
+            "uv venv .venv | tail -2 && time uv pip install -r requirements.txt | tail -5"
+        )
+        self.assertEqual(detect.executable_of(command), "uv")
+
+    def test_a_block_is_one_unit(self):
+        """The `;` inside a loop does not sequence the loop after what precedes
+        it: here `ls` failing is what stops the line."""
+        command = 'ls $RD && for f in $RD/out*; do cat "$f"; done | head -100'
+        self.assertEqual(detect.executable_of(command), "ls")
+
+    def test_a_case_pattern_is_not_the_program(self):
+        command = 'for t in $T; do case $t in *Body) continue;; esac; demo-cli $t; done'
+        self.assertEqual(detect.executable_of(command), "demo-cli")
+
+    def test_a_loop_exit_is_not_the_program(self):
+        command = 'for i in 1 2 3; do demo-cli poll; [ "$i" = 3 ] && break; done'
+        self.assertEqual(detect.executable_of(command), "demo-cli")
+
+    def test_a_trailing_producer_does_not_take_the_attribution(self):
+        self.assertEqual(detect.executable_of("demo-cli build; echo done"), "demo-cli")
+
+    def test_an_and_chain_keeps_its_first_program(self):
+        """Which side of `&&` failed is unknowable from the command alone."""
+        self.assertEqual(detect.executable_of("git pull && make build"), "git")
 
     def test_a_separator_inside_quotes_does_not_split(self):
         """Splitting on a quoted newline or semicolon reads the text of a commit

@@ -51,7 +51,11 @@ _CONTROL_PREFIXES = frozenset({"do", "then", "else", "elif", "if", "while", "unt
 
 #: Control-flow words that never precede a program: `for i in 1 2 3` names a
 #: variable, and `done` or `fi` closes a block. The segment holds no executable.
-_CONTROL_TERMINALS = frozenset({"for", "done", "fi", "esac", "case", "select", "in"})
+#: `break` and `continue` end a loop's last unit, which would otherwise take the
+#: attribution from the program the loop runs.
+_CONTROL_TERMINALS = frozenset(
+    {"for", "done", "fi", "esac", "case", "select", "in", "break", "continue"}
+)
 
 #: Source-code keywords. A transcript sometimes records a code fragment where a
 #: command belongs, and `const x = 1` is not a program called `const`.
@@ -81,8 +85,17 @@ _PIPE_PRODUCERS = frozenset({"echo", "printf", "cat", "yes", "seq"})
 _WRAPPER_VALUE_OPTIONS = frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"})
 
 _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-#: Fast path for the common command with no quoting to respect.
-_SEGMENT_SPLIT = re.compile(r"\s*(?:&&|\|\||;|\||\n)\s*")
+#: Fast path for the common command with no quoting to respect. The capture
+#: keeps each separator, because which one joins two segments decides whose
+#: exit status the shell reports.
+_SEGMENT_SPLIT = re.compile(r"\s*(&&|\|\||;|\||\n)\s*")
+
+#: Separators after which the next command runs unconditionally. The status of
+#: `a; b` is always b's, so these bound the units a failure is attributed to.
+_SEQUENCE_SEPARATORS = frozenset({";", "\n"})
+
+_BLOCK_OPENERS = frozenset({"for", "while", "until", "if", "case", "select"})
+_BLOCK_CLOSERS = frozenset({"done", "fi", "esac"})
 
 #: A newline separates commands like `;` does, so a multi-line script is a
 #: sequence rather than one command named after its first line. Splitting on it
@@ -246,24 +259,93 @@ def _analyze(command: str | None) -> tuple[str | None, str | None, tuple[str, ..
     if not command or not command.strip():
         return None, None, ()
 
-    fallback: tuple[str, str | None, tuple[str, ...]] | None = None
-    for segment in _split_segments(_strip_heredocs(command).strip()):
-        parsed = _analyze_segment(segment)
-        if parsed is None:
-            continue
-        if fallback is None:
-            fallback = parsed
-        if parsed[0] not in _SHELL_NOISE and parsed[0] not in _PIPE_PRODUCERS:
-            return parsed
-    return fallback if fallback is not None else (None, None, ())
+    # The last unit that runs a real program is the one whose status the shell
+    # reports: `trash x && make test; ls out` failing is about `ls`, and naming
+    # the first program filed that failure against `trash`.
+    units = [
+        [parsed for parsed in map(_analyze_segment, unit) if parsed is not None]
+        for unit in _sequential_units(_split_segments(_normalize(command)))
+    ]
+    for unit in reversed(units):
+        for parsed in unit:
+            if parsed[0] not in _SHELL_NOISE and parsed[0] not in _PIPE_PRODUCERS:
+                return parsed
+    first = next((parsed for unit in units for parsed in unit), None)
+    return first if first is not None else (None, None, ())
 
 
-def _split_segments(command: str) -> list[str]:
-    """Split a command line on shell separators that are not inside quotes."""
+def _normalize(command: str) -> str:
+    """Heredoc bodies dropped and backslash continuations joined into one line."""
+    return _strip_heredocs(command).replace("\\\n", " ").strip()
+
+
+def _sequential_units(segments: list[tuple[str, str]]) -> list[list[str]]:
+    """Group segments into units separated by `;` or a newline.
+
+    A `for`, `while`, `if` or `case` block is one unit however many `;` it
+    holds: in `ls d && for f in *; do cat $f; done | head`, the `head` does not
+    run after the `ls` so much as after the whole block.
+    """
+    units: list[list[str]] = [[]]
+    depth = 0
+    for separator, segment in segments:
+        if separator in _SEQUENCE_SEPARATORS and depth == 0:
+            units.append([])
+        units[-1].append(segment)
+        keyword = _block_keyword(segment)
+        if keyword in _BLOCK_OPENERS:
+            depth += 1
+        elif keyword in _BLOCK_CLOSERS:
+            depth = max(depth - 1, 0)
+    return units
+
+
+def _block_keyword(segment: str) -> str | None:
+    for token in segment.split():
+        if token not in ("do", "then", "else", "!"):
+            return token
+    return None
+
+
+def _status_owner(command: str | None) -> str | None:
+    """The program whose exit status the shell reports, when that is knowable.
+
+    That is the last element of the last pipeline. A `&&` makes it unknowable:
+    in `make build && rg x`, a status of 1 may be make's. Only a chain of shell
+    noise such as `cd dir && rg x` is exempt, since noise is not what failed.
+    """
+    if not command or not command.strip():
+        return None
+    segments = _split_segments(_normalize(command))
+    last = _analyze_segment(segments[-1][1])
+    if last is None:
+        return None
+    start = len(segments) - 1
+    while start > 0 and segments[start][0] == "|":
+        start -= 1
+    if start < len(segments) - 1 and "pipefail" in command:
+        # Any element of the pipeline may own the status.
+        return None
+    index = start
+    while index > 0 and segments[index][0] not in _SEQUENCE_SEPARATORS:
+        preceding = _analyze_segment(segments[index - 1][1])
+        if preceding is None or preceding[0] not in _SHELL_NOISE:
+            return None
+        index -= 1
+    return last[0]
+
+
+def _split_segments(command: str) -> list[tuple[str, str]]:
+    """Split a command line on shell separators that are not inside quotes.
+
+    Each segment comes with the separator before it, `""` for the first.
+    """
     if "'" not in command and '"' not in command and "$(" not in command:
-        return _SEGMENT_SPLIT.split(command)
+        parts = _SEGMENT_SPLIT.split(command)
+        return list(zip([""] + parts[1::2], parts[0::2]))
 
-    segments: list[str] = []
+    segments: list[tuple[str, str]] = []
+    separator_before = ""
     current: list[str] = []
     quote = ""
     depth = 0
@@ -299,14 +381,15 @@ def _split_segments(command: str) -> list[str]:
             continue
         for separator in _SEPARATORS:
             if command.startswith(separator, index):
-                segments.append("".join(current).strip())
+                segments.append((separator_before, "".join(current).strip()))
+                separator_before = separator
                 current = []
                 index += len(separator)
                 break
         else:
             current.append(char)
             index += 1
-    segments.append("".join(current).strip())
+    segments.append((separator_before, "".join(current).strip()))
     return segments
 
 
@@ -723,6 +806,14 @@ def _is_answer_not_failure(call: ToolCall) -> bool:
     """
     if call.exit_code != 1:
         return False
+    owner = _status_owner(call.command)
+    if owner is not None:
+        # Earlier commands in the line may have printed plenty, so the output
+        # cannot be required to be empty. The owner's own diagnostic can be
+        # required to be absent: `grep: x: No such file` is a real failure.
+        return owner in _STATUS_AS_ANSWER and not re.search(
+            rf"(?m)^{re.escape(owner)}: ", call.result_text or ""
+        )
     executable = executable_of(call.command) or call.tool_name
     if executable not in _STATUS_AS_ANSWER:
         return False

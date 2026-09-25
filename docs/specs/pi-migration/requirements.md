@@ -61,11 +61,13 @@ WHEN a tool result text indicates a stall（timeout、killed、deadline 等 patt
 
 ### REQ-007: Tracked CLI attribution
 
-The system SHALL attribute tool-route evidence to tracked CLIs，以 config 的明確名單為主、name suffix pattern 為輔；`bashExecution` 的非零 `exitCode` 與 `cancelled` 同樣構成 tool-route 佐證；並偵測 retry-before-success（同 session 重複呼叫 + failure/hang 佐證或同 subcommand flag 變形）。
+The system SHALL attribute tool-route evidence to tracked CLIs，以 config 的明確名單為主、name suffix pattern 為輔；`bashExecution` 的非零 `exitCode` 與 `cancelled` 同樣構成 tool-route 佐證；並偵測 retry-before-success（同 session 重複呼叫 + failure/hang 佐證或同 subcommand flag 變形）。Compound command 依 shell 回報 exit status 的方式歸因：取最後一個以 `;` 或換行分隔、且含實際 program 的 unit（`for`/`while`/`if`/`case` block 視為單一 unit），unit 內沿用第一個非 noise program；搜尋類 program（`grep`、`rg` 等）的 exit 1，只有在它確定是 status owner（最後一段 pipeline 的最後一個元素，前面沒有非 noise 的 `&&`，且未開 `pipefail`）並且輸出中沒有它自己的 diagnostic 時，才視為「沒找到」而非 failure。
 
 - AC-011: GIVEN config 名單含 `foo` 且 `foo` 在 session 中失敗 WHEN routing THEN 產生 target 為 `foo` 的 tool route proposal
 - AC-012: GIVEN 同一 CLI 同 subcommand 三次以上不同 flag 組合且伴隨一次 failure WHEN 偵測 THEN proposal summary 註記 retry 次數
 - AC-043: GIVEN 一筆 `bashExecution` 執行 tracked CLI `foo` 且 `exitCode` 為 127 WHEN routing THEN 產生 target 為 `foo` 的 tool route evidence
+- AC-056: GIVEN command 為 `trash d && make test; ls d` 且失敗 WHEN 偵測 THEN failure 歸因於 `ls`，不歸因於 `trash`
+- AC-057: GIVEN command 為 `rg a f; rg b g`，第一段有輸出而第二段無匹配，exit 1 WHEN 偵測 THEN 不產生 failure；GIVEN `make build && rg x` exit 1 THEN 仍產生 failure
 
 ### REQ-008: Silent-empty detection
 
