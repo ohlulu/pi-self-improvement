@@ -282,6 +282,7 @@ def _absorb_message(
     stamp = message.get("timestamp") or timestamp
 
     if role == "user":
+        summary.user_turn_lines.append(line)
         text = _text_of(message.get("content"))
         if text:
             summary.user_messages.append(UserMessage(text=text, line=line, timestamp=stamp))

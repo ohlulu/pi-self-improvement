@@ -227,6 +227,20 @@ class TestRoleMapping(FixtureParseTestCase):
         self.assertNotIn("Listing project docs", joined)
         self.assertEqual(summary.counts.skipped_records.get("custom_message"), 1)
 
+    def test_an_image_only_user_message_is_still_a_user_turn(self):
+        """It carries no text to mine, but it ends the agent's previous answer."""
+        image_only = support.user_record("", record_id="u2")
+        image_only["message"]["content"] = [{"type": "image", "data": "", "mimeType": "image/png"}]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = support.write_jsonl(
+                Path(tmp) / "t.jsonl",
+                [support.session_record("x"), support.user_record("hello"), image_only],
+            )
+            summary = parse.parse_transcript(path)
+
+        self.assertEqual([message.line for message in summary.user_messages], [2])
+        self.assertEqual(summary.user_turn_lines, [2, 3])
+
     def test_custom_records_are_counted_not_dropped(self):
         """REQ-003: an extension record never reaches a detector, but is counted."""
         summary = parse.parse_transcript(self.clean)

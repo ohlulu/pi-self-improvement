@@ -547,15 +547,23 @@ class TestSkillsEdited(DetectTestCase):
 
     correction = "不對，我是說要用 X"
 
-    def corrected(self, *calls, next_user: int | None = None):
+    def corrected(self, *calls, next_user: int | None = None, cwd: str | None = None):
         messages = [UserMessage(text=self.correction, line=10)]
+        turn_lines = [10]
         if next_user is not None:
-            messages.append(UserMessage(text="thanks", line=next_user))
-        summary = session(*calls, user_messages=messages, assistant_turns=[turn("ok", line=5)])
+            # No text, like an image-only message: it still ends the answer.
+            turn_lines.append(next_user)
+        summary = session(
+            *calls,
+            cwd=cwd,
+            user_messages=messages,
+            user_turn_lines=turn_lines,
+            assistant_turns=[turn("ok", line=5)],
+        )
         return self.only(summary, detect.CORRECTION)[0].detail["skills_edited"]
 
-    def edit(self, path: str, *, line: int = 12, is_error=False, tool: str = "edit"):
-        return call(tool, arguments={"path": path}, line=line, is_error=is_error)
+    def edit(self, path: str, *, line: int = 12, is_error=False, tool: str = "edit", result: str = ""):
+        return call(tool, arguments={"path": path}, line=line, is_error=is_error, result=result)
 
     def test_an_edit_under_a_skill_directory_names_that_skill(self):
         edited = self.corrected(self.edit("~/.pi/agent/skills/deep-research/SKILL.md"))
@@ -588,6 +596,15 @@ class TestSkillsEdited(DetectTestCase):
     def test_a_failed_edit_changed_nothing(self):
         self.assertEqual(self.corrected(self.edit("/s/skills/demo/SKILL.md", is_error=True)), ())
 
+    def test_a_failed_edit_without_the_error_flag_changed_nothing(self):
+        """REQ-005: with `isError` absent, the result text decides, as it does for failures."""
+        failed = self.edit("/s/skills/demo/SKILL.md", is_error=None, result="EACCES: permission denied")
+
+        self.assertEqual(self.corrected(failed), ())
+
+    def test_a_relative_path_resolves_against_the_session_cwd(self):
+        self.assertEqual(self.corrected(self.edit("SKILL.md"), cwd="/s/skills/demo"), ("demo",))
+
     def test_an_edit_outside_any_skill_is_not_named(self):
         self.assertEqual(self.corrected(self.edit("/repo/src/app.py")), ())
 
@@ -612,6 +629,16 @@ class TestSkillOf(unittest.TestCase):
 
     def test_a_path_without_skills_is_not_a_skill(self):
         self.assertIsNone(detect.skill_of("/repo/docs/SKILL.md"))
+
+    def test_an_earlier_skills_segment_never_stands_in_for_the_last(self):
+        """A checkout under a `skills` directory editing its own `skills/README.md`."""
+        self.assertIsNone(detect.skill_of("/home/u/skills/kit/skills/README.md"))
+
+    def test_a_path_that_climbs_out_of_the_skill_is_not_in_it(self):
+        self.assertIsNone(detect.skill_of("/repo/skills/demo/../../docs/a.md"))
+
+    def test_a_home_relative_path_is_not_joined_to_the_cwd(self):
+        self.assertEqual(detect.skill_of("~/.pi/agent/skills/commit/SKILL.md", "/repo"), "commit")
 
 
 class TestExecutableAttribution(DetectTestCase):

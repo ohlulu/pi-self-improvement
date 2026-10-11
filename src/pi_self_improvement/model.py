@@ -175,6 +175,9 @@ class SessionSummary:
     ended_at: str | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
     user_messages: list[UserMessage] = field(default_factory=list)
+    #: Line of every user record, including image-only ones with no text: each
+    #: one ends the agent's answer to whatever the user said before it.
+    user_turn_lines: list[int] = field(default_factory=list)
     assistant_turns: list[AssistantTurn] = field(default_factory=list)
     counts: ParseCounts = field(default_factory=ParseCounts)
 

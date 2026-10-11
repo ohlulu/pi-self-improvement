@@ -2,7 +2,7 @@
 
 Supersedes [ADR-0007](0007-skill-detection-defaults-to-read-heuristic.md).
 
-A correction is filed against a skill only when the agent answered it by changing that skill's files: a successful `edit` or `write` under `.../skills/<name>/` after the correction and before the next user message. Exactly one such skill routes the correction to `skill_improvement:<name>`. None, or more than one, routes it to `memory_context:<repo>`. Skill loads are no longer detected, and the `skill_loaded_custom_types` config key is removed.
+A correction is filed against a skill only when the agent answered it by changing that skill's files: a successful `edit` or `write` under `.../skills/<name>/` after the correction and before the next user message. A topic correction keeps its own target, `memory_context:style:<topic>`, whatever was edited. For any other correction, exactly one such skill routes the correction to `skill_improvement:<name>`. None, or more than one, routes it to `memory_context:<repo>`. Skill loads are no longer detected, and the `skill_loaded_custom_types` config key is removed.
 
 The previous rule credited the most recently loaded skill with every later correction in the session, with no distance limit. On the author's corpus in 2026-10 that produced 235 skill_improvement evidence items, most of them product feedback or a new task that happened to follow a skill load. `commit` was the worst case: it is loaded at the end of a turn, so the next message is almost always new work, and `skill_improvement:commit` came back in 11 consecutive runs without one real correction of the commit skill.
 

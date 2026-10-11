@@ -57,7 +57,7 @@ read_when:
 
 ### DEC-006: Skill attribution follows the agent's edit, not the skill load
 
-**Choice**: correction 之後、下一則 user message 之前，agent 以成功的 `edit`/`write` 修改了 `.../skills/<name>/` 底下的檔案 → 該 correction 記錄 `<name>`。恰好一個 skill 時 route 到 `skill_improvement:<name>`，否則 `memory_context:<repo>`。skill 載入不再偵測，config `skill_loaded_custom_types` 移除。
+**Choice**: correction 之後、下一則 user message 之前，agent 以成功的 `edit`/`write` 修改了 `.../skills/<name>/` 底下的檔案 → 該 correction 記錄 `<name>`。帶 topic 的 correction 一律 route 到 `memory_context:style:<topic>`（AC-055）；其餘恰好一個 skill 時 route 到 `skill_improvement:<name>`，否則 `memory_context:<repo>`。skill 載入不再偵測，config `skill_loaded_custom_types` 移除。
 **Alternatives**: (a) 原案「session 內最後載入的 skill」——2026-10 作者語料 235 筆 skill_improvement evidence 多為產品回饋或新任務，`commit` 連續 11 次 run 全是誤判；(b) 只算載入後第一則 user message——剩 73 筆，`commit` 仍有 13 筆雜訊；(c) 載入在被回覆的 turn 內且其後有 edit/write——`commit` 降到 2 筆，但 ground truth 的 target 全判錯（實際被修的是另一個 skill）；(d) 文字提到 skill 名稱——只剩 12 筆且漏掉真案例。
 **Rationale**: 載入時機只說明 skill 在場，不說明使用者在糾正誰；agent 實際去改的那個 skill 才是修正落點。代價是沒被當場修掉的隱含 skill 失誤改走 `memory_context`，仍可見，只是不掛 skill key；被歸因者也包含使用者主動要求擴充 skill 的情況。
 **Satisfies**: REQ-009、REQ-013

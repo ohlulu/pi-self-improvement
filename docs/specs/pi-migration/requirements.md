@@ -78,7 +78,7 @@ WHEN a data-intending call returns a structurally empty result（`[]`、`{}`、`
 
 ### REQ-009: Skill attribution
 
-WHEN the agent answers a correction by changing files under a skill directory, the system SHALL record that skill on the correction evidence。判定範圍為該 correction 之後、下一則 user message 之前，成功的 `edit`/`write` tool call；skill 名稱取 path 中最後一個 `skills` 之後的目錄名（`.../skills/<name>/<file>`）。只讀取、載入過 skill 不構成歸因（見 ADR-0008）。
+WHEN the agent answers a correction by changing files under a skill directory, the system SHALL record that skill on the correction evidence。判定範圍為該 correction 之後、下一則 user message（含無文字的圖片訊息）之前，成功的 `edit`/`write` tool call，成功與否依 REQ-005 的 failure 判定；相對 path 依 session cwd 解析並正規化 `..`，skill 名稱取最後一個 `skills` 之後的目錄名（`.../skills/<name>/<file>`），最後一個 `skills` 後不足兩層即不屬於任何 skill。只讀取、載入過 skill 不構成歸因（見 ADR-0008）。
 
 - AC-015: GIVEN correction 之後 agent 成功 edit `~/.pi/agent/skills/commit/SKILL.md` WHEN 偵測 THEN 該 correction 記錄 skill `commit`
 - AC-044: GIVEN correction 之前讀過 `commit/SKILL.md`、之後沒有任何 skill 檔案被修改 WHEN 偵測 THEN 該 correction 不記錄任何 skill

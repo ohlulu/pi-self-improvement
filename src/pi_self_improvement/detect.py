@@ -11,6 +11,7 @@ Every string that leaves this module has passed through the redaction boundary.
 
 from __future__ import annotations
 
+import posixpath
 import re
 from dataclasses import dataclass, field
 
@@ -541,29 +542,34 @@ def detect_session(
     return signals
 
 
-def skill_of(path: str) -> str | None:
+def skill_of(path: str, cwd: str | None = None) -> str | None:
     """The skill a file belongs to: `.../skills/<name>/<file>` names `<name>`.
 
-    The last `skills` segment wins, so a checkout that itself lives under a
-    directory called `skills` still resolves to the skill, not the checkout.
+    A relative path is resolved against the session's `cwd`, as the tool did
+    when it ran. Only the last `skills` segment counts, so a checkout that
+    itself lives under a directory called `skills` never resolves to the
+    checkout.
     """
-    parts = [part for part in path.replace("\\", "/").split("/") if part]
-    for index in range(len(parts) - 3, -1, -1):
-        if parts[index] == _SKILLS_DIR:
-            return parts[index + 1]
-    return None
+    path = path.replace("\\", "/")
+    if cwd and not path.startswith(("/", "~")):
+        path = posixpath.join(cwd.replace("\\", "/"), path)
+    parts = [part for part in posixpath.normpath(path).split("/") if part]
+    if _SKILLS_DIR not in parts:
+        return None
+    index = len(parts) - 1 - parts[::-1].index(_SKILLS_DIR)
+    return parts[index + 1] if index + 2 < len(parts) else None
 
 
 def _skills_edited(summary: SessionSummary, after: int, before: int | None) -> tuple[str, ...]:
-    """DEC-006: skills whose files the agent changed between two user messages."""
+    """DEC-006: skills whose files the agent changed between two user turns."""
     edited: set[str] = set()
     for call in summary.tool_calls:
         if call.line <= after or (before is not None and call.line >= before):
             continue
-        if call.tool_name not in _FILE_WRITE_TOOLS or not call.matched or call.is_error is True:
+        if call.tool_name not in _FILE_WRITE_TOOLS or not call.matched or _is_failure(call):
             continue
         path = call.arguments.get("path")
-        name = skill_of(path) if isinstance(path, str) else None
+        name = skill_of(path, summary.cwd) if isinstance(path, str) else None
         if name:
             edited.add(name)
     return tuple(sorted(edited))
@@ -601,7 +607,7 @@ def _detect_corrections(
     if not summary.assistant_turns or not config.cue_packs or summary.is_subagent:
         return []
     first_answer = min(turn.line for turn in summary.assistant_turns)
-    user_lines = sorted(message.line for message in summary.user_messages)
+    user_turn_lines = sorted(summary.user_turn_lines)
 
     signals: list[Signal] = []
     for message in summary.user_messages:
@@ -610,7 +616,7 @@ def _detect_corrections(
         hit = cues.find_cue(message.text, config.cue_packs)
         if hit is None:
             continue
-        next_user = next((line for line in user_lines if line > message.line), None)
+        next_user = next((line for line in user_turn_lines if line > message.line), None)
         signals.append(
             Signal(
                 kind=CORRECTION,
