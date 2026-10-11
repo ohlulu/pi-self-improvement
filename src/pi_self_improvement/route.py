@@ -17,7 +17,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .detect import CORRECTION, FAILURE, HANG, RETRY, SILENT_EMPTY, SKILL, Signal
+from .detect import CORRECTION, FAILURE, HANG, RETRY, SILENT_EMPTY, Signal
 from .redact import Redactor, shorten_home
 
 ROUTE_TOOL = "tool"
@@ -177,16 +177,12 @@ def build_proposals(
     redactor = redactor or _TARGET_REDACTOR
     ordered = sorted(signals, key=lambda s: (s.evidence.session_id or "", s.evidence.line))
 
-    skills = _skills_by_session(ordered)
     grouped: dict[tuple[str, str], list[Signal]] = defaultdict(list)
     corrections_seen: dict[str, int] = defaultdict(int)
 
     for signal in ordered:
-        if signal.kind == SKILL:
-            # Context for AC-022, never a proposal of its own.
-            continue
         placement = (
-            _route_correction(signal, skills, corrections_seen, config)
+            _route_correction(signal, corrections_seen, config)
             if signal.kind == CORRECTION
             else _route_tool_signal(signal, config)
         )
@@ -220,19 +216,8 @@ def _safe_target(target: str) -> str:
     return _TARGET_REDACTOR.text(target) or UNKNOWN_TARGET
 
 
-def _skills_by_session(signals) -> dict[str, list[tuple[int, str]]]:
-    skills: dict[str, list[tuple[int, str]]] = defaultdict(list)
-    for signal in signals:
-        if signal.kind == SKILL:
-            skills[signal.evidence.session_id or ""].append((signal.evidence.line, signal.subject))
-    for entries in skills.values():
-        entries.sort()
-    return skills
-
-
 def _route_correction(
     signal: Signal,
-    skills: dict[str, list[tuple[int, str]]],
     corrections_seen: dict[str, int],
     config: RouteConfig,
 ) -> tuple[str, str] | None:
@@ -246,21 +231,13 @@ def _route_correction(
         # The global instruction file is the fix even when a skill was loaded:
         # the same complaint lands under every skill and every repo.
         return (ROUTE_MEMORY, STYLE_PREFIX + topic)
-    skill = _skill_before(skills.get(session, ()), signal.evidence.line)
-    if skill:
-        # AC-022: the skill was loaded and the user still had to correct it.
-        return (ROUTE_SKILL, skill)
+    edited = signal.detail.get("skills_edited") or ()
+    if len(edited) == 1:
+        # AC-022: the agent answered the correction by changing exactly one
+        # skill, so that skill is where the fix lives. Which skill happened to
+        # be loaded earlier says nothing about what the user corrected.
+        return (ROUTE_SKILL, edited[0])
     return (ROUTE_MEMORY, repository_root(signal.detail.get("cwd"), home=config.home))
-
-
-def _skill_before(entries, line: int) -> str | None:
-    name = None
-    for skill_line, skill_name in entries:
-        if skill_line < line:
-            name = skill_name
-        else:
-            break
-    return name
 
 
 def _route_tool_signal(signal: Signal, config: RouteConfig) -> tuple[str, str] | None:
@@ -295,8 +272,8 @@ def summarize(proposal: Proposal, redactor: Redactor) -> str:
 
     if proposal.route == ROUTE_SKILL:
         return (
-            f"`{target}` was loaded, then the user corrected the result "
-            f"{kinds[CORRECTION]} time(s) across {sessions} session(s)"
+            f"the agent answered {kinds[CORRECTION]} correction(s) by editing `{target}` "
+            f"across {sessions} session(s)"
         )
     if proposal.route == ROUTE_MEMORY and target.startswith(STYLE_PREFIX):
         return (
@@ -307,7 +284,7 @@ def summarize(proposal: Proposal, redactor: Redactor) -> str:
     if proposal.route == ROUTE_MEMORY:
         return (
             f"{kinds[CORRECTION]} correction(s) in `{target}` across {sessions} session(s) "
-            "with no skill loaded beforehand"
+            "that no single skill edit answered"
         )
 
     parts = []

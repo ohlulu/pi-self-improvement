@@ -81,7 +81,9 @@ Make the change by hand, in the smallest form that addresses the evidence:
 - `tool:<executable>` — the CLI's own behaviour, its wrapper, or the instruction
   telling the agent to use it
 - `tool:ext:<family>` — the extension's tool descriptions or error handling
-- `skill_improvement:<skill>` — the skill body that failed to prevent the correction
+- `skill_improvement:<skill>` — the skill the agent edited in answer to the
+  correction. The edit may already be the fix, and the correction may be a
+  request to extend the skill rather than a gap in it, so check both first
 - `memory_context:<repo>` — that repo's `AGENTS.md` or project docs
 - `memory_context:style:<topic>` — a complaint about how the agent writes
   (`verbosity`), collected across every repo and skill; the fix is a rule in

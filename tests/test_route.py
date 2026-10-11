@@ -38,20 +38,18 @@ class RouteTestCase(unittest.TestCase):
 
 
 class TestFourRoutes(RouteTestCase):
-    def test_a_correction_after_a_skill_becomes_a_skill_improvement(self):
+    def test_a_correction_answered_by_one_skill_edit_becomes_a_skill_improvement(self):
         """AC-022."""
         keys = self.keys(
-            signal(detect.SKILL, "sample-skill", line=4),
-            signal(detect.CORRECTION, "/tmp/x", line=9, cwd="/tmp/x"),
+            signal(detect.CORRECTION, "/tmp/x", line=9, cwd="/tmp/x", skills_edited=("sample-skill",)),
         )
 
         self.assertEqual(keys, ["skill_improvement:sample-skill"])
 
-    def test_a_skill_loaded_after_the_correction_does_not_count(self):
-        """The skill has to have been loaded before the user complained."""
+    def test_a_correction_answered_by_several_skill_edits_stays_with_the_repo(self):
+        """No single skill is the fix, so none is credited."""
         proposals = self.build(
-            signal(detect.SKILL, "sample-skill", line=20),
-            signal(detect.CORRECTION, "/tmp/x", line=9, cwd="/tmp/x"),
+            signal(detect.CORRECTION, "/tmp/x", line=9, cwd="/tmp/x", skills_edited=("alpha", "beta")),
         )
 
         self.assertEqual([p.route for p in proposals], [route.ROUTE_MEMORY])
@@ -73,11 +71,17 @@ class TestFourRoutes(RouteTestCase):
 
         self.assertEqual(keys, ["memory_context:style:verbosity"])
 
-    def test_a_verbosity_correction_outranks_a_loaded_skill(self):
+    def test_a_verbosity_correction_outranks_an_edited_skill(self):
         """The same complaint lands under every skill; the fix is a global rule."""
         proposals = self.build(
-            signal(detect.SKILL, "sample-skill", line=4),
-            signal(detect.CORRECTION, "/tmp/x", line=9, cwd="/tmp/x", topic="verbosity"),
+            signal(
+                detect.CORRECTION,
+                "/tmp/x",
+                line=9,
+                cwd="/tmp/x",
+                topic="verbosity",
+                skills_edited=("sample-skill",),
+            ),
         )
 
         self.assertEqual([p.key for p in proposals], ["memory_context:style:verbosity"])
@@ -119,9 +123,6 @@ class TestFourRoutes(RouteTestCase):
         )
 
         self.assertEqual(keys, [])
-
-    def test_a_skill_signal_alone_produces_no_proposal(self):
-        self.assertEqual(self.keys(signal(detect.SKILL, "sample-skill", line=4)), [])
 
     def test_a_subagent_failure_never_reaches_the_backlog(self):
         """AC-021, enforced at the routing boundary."""
@@ -373,8 +374,7 @@ class TestSummaries(RouteTestCase):
 
     def test_a_skill_summary_names_the_skill(self):
         proposals = self.build(
-            signal(detect.SKILL, "sample-skill", line=4),
-            signal(detect.CORRECTION, "/tmp/x", line=9, cwd="/tmp/x"),
+            signal(detect.CORRECTION, "/tmp/x", line=9, cwd="/tmp/x", skills_edited=("sample-skill",)),
         )
 
         self.assertIn("`sample-skill`", proposals[0].summary)

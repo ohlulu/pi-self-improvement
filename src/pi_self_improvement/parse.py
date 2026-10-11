@@ -26,7 +26,6 @@ from .model import (
     ORIGIN_ROOT,
     ORIGIN_SUBAGENT,
     AssistantTurn,
-    CustomEntry,
     ParseCounts,
     SessionSummary,
     ToolCall,
@@ -223,20 +222,10 @@ def parse_transcript(path: str | Path, *, origin: str | None = None) -> SessionS
 
         if record_type == "session":
             continue
-        if record_type == "custom":
-            counts.skip("custom")
-            summary.custom_entries.append(
-                CustomEntry(
-                    custom_type=str(record.get("customType") or ""),
-                    data=record.get("data") or {},
-                    line=line,
-                    timestamp=timestamp,
-                )
-            )
-            continue
         if record_type != "message":
-            # Injected context (`custom_message`), compactions, labels and the rest
-            # never reach a detector, but REQ-003 forbids dropping them silently.
+            # Extension records (`custom`, `custom_message`), compactions, labels and
+            # the rest never reach a detector, but REQ-003 forbids dropping them
+            # silently.
             counts.skip(str(record_type))
             continue
 

@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from pi_self_improvement import detect, parse
-from pi_self_improvement.model import KIND_BASH_EXECUTION, SessionSummary, ToolCall
+from pi_self_improvement.model import KIND_BASH_EXECUTION, SessionSummary, ToolCall, UserMessage
 from pi_self_improvement.redact import Redactor
 
 from tests import support
@@ -542,83 +542,76 @@ class TestSilentEmpty(DetectTestCase):
         self.assertEqual(len(self.only(summary, detect.SILENT_EMPTY)), 1)
 
 
-class TestSkillInvocation(DetectTestCase):
-    """REQ-009 / DEC-006: the read-path heuristic is the specification default."""
+class TestSkillsEdited(DetectTestCase):
+    """DEC-006 / AC-022: the skill a correction names is the one the agent then edits."""
 
-    def test_a_skill_md_read_names_the_skill_after_its_directory(self):
-        """AC-015, using the path the requirement names literally."""
-        summary = session(
-            call("read", arguments={"path": "~/.pi/agent/skills/commit/SKILL.md"}, result="---", is_error=False)
+    correction = "不對，我是說要用 X"
+
+    def corrected(self, *calls, next_user: int | None = None):
+        messages = [UserMessage(text=self.correction, line=10)]
+        if next_user is not None:
+            messages.append(UserMessage(text="thanks", line=next_user))
+        summary = session(*calls, user_messages=messages, assistant_turns=[turn("ok", line=5)])
+        return self.only(summary, detect.CORRECTION)[0].detail["skills_edited"]
+
+    def edit(self, path: str, *, line: int = 12, is_error=False, tool: str = "edit"):
+        return call(tool, arguments={"path": path}, line=line, is_error=is_error)
+
+    def test_an_edit_under_a_skill_directory_names_that_skill(self):
+        edited = self.corrected(self.edit("~/.pi/agent/skills/deep-research/SKILL.md"))
+
+        self.assertEqual(edited, ("deep-research",))
+
+    def test_a_write_to_a_skill_reference_file_counts(self):
+        edited = self.corrected(
+            self.edit("/repo/.pi/skills/sample-release/references/store.md", tool="write")
         )
 
-        signals = self.only(summary, detect.SKILL)
+        self.assertEqual(edited, ("sample-release",))
 
-        self.assertEqual(len(signals), 1)
-        self.assertEqual(signals[0].subject, "commit")
-
-    def test_an_absolute_path_works_the_same(self):
-        summary = session(
-            call("read", arguments={"path": "/tmp/pi-fixtures/skills/demo-skill/SKILL.md"}, is_error=False)
+    def test_a_skill_that_was_only_read_is_not_named(self):
+        """The regression: loading a skill earlier says nothing about the correction."""
+        edited = self.corrected(
+            call("read", arguments={"path": "~/.pi/agent/skills/commit/SKILL.md"}, line=4, is_error=False)
         )
 
-        self.assertEqual(self.only(summary, detect.SKILL)[0].subject, "demo-skill")
+        self.assertEqual(edited, ())
 
-    def test_a_failed_read_loaded_nothing(self):
-        summary = session(
-            call(
-                "read",
-                arguments={"path": "/tmp/skills/gone/SKILL.md"},
-                result="No such file or directory",
-                is_error=True,
-            )
+    def test_an_edit_before_the_correction_does_not_count(self):
+        self.assertEqual(self.corrected(self.edit("/s/skills/demo/SKILL.md", line=8)), ())
+
+    def test_an_edit_after_the_next_user_message_does_not_count(self):
+        edited = self.corrected(self.edit("/s/skills/demo/SKILL.md", line=30), next_user=20)
+
+        self.assertEqual(edited, ())
+
+    def test_a_failed_edit_changed_nothing(self):
+        self.assertEqual(self.corrected(self.edit("/s/skills/demo/SKILL.md", is_error=True)), ())
+
+    def test_an_edit_outside_any_skill_is_not_named(self):
+        self.assertEqual(self.corrected(self.edit("/repo/src/app.py")), ())
+
+    def test_every_edited_skill_is_reported(self):
+        edited = self.corrected(
+            self.edit("/s/skills/beta/SKILL.md", line=12),
+            self.edit("/s/skills/alpha/SKILL.md", line=14),
         )
 
-        self.assertEqual(self.only(summary, detect.SKILL), [])
+        self.assertEqual(edited, ("alpha", "beta"))
 
-    def test_an_unrelated_read_is_not_a_skill(self):
-        summary = session(call("read", arguments={"path": "/tmp/notes/README.md"}, is_error=False))
 
-        self.assertEqual(self.only(summary, detect.SKILL), [])
+class TestSkillOf(unittest.TestCase):
+    def test_the_directory_under_skills_names_the_skill(self):
+        self.assertEqual(detect.skill_of("~/.pi/agent/skills/commit/SKILL.md"), "commit")
 
-    def test_a_file_merely_containing_the_word_skill_is_not_one(self):
-        summary = session(call("read", arguments={"path": "/tmp/docs/SKILL.md.bak"}, is_error=False))
+    def test_the_last_skills_segment_wins(self):
+        self.assertEqual(detect.skill_of("/home/u/skills/kit/skills/demo/SKILL.md"), "demo")
 
-        self.assertEqual(self.only(summary, detect.SKILL), [])
+    def test_a_file_directly_under_skills_is_not_a_skill(self):
+        self.assertIsNone(detect.skill_of("/repo/skills/README.md"))
 
-    def test_custom_entries_are_ignored_by_default(self):
-        """AC-044: opt-in, because the entry comes from a personal extension."""
-        summary = parse.parse_transcript(
-            support.FIXTURE_SESSIONS
-            / "--tmp-pi-fixtures-alpha--"
-            / "2026-01-05T09-00-00-000Z_00000000-0000-7000-8000-00000000a001.jsonl"
-        )
-
-        names = [signal.subject for signal in self.only(summary, detect.SKILL)]
-
-        self.assertEqual(names, ["demo-skill"], "the custom entry must not double-count")
-
-    def test_custom_entries_count_once_configured(self):
-        """AC-044, second half."""
-        summary = parse.parse_transcript(
-            support.FIXTURE_SESSIONS
-            / "--tmp-pi-fixtures-alpha--"
-            / "2026-01-05T09-00-00-000Z_00000000-0000-7000-8000-00000000a001.jsonl"
-        )
-        config = detect.DetectConfig(skill_loaded_custom_types=("context:skill_loaded",))
-
-        names = [signal.subject for signal in self.only(summary, detect.SKILL, config)]
-
-        self.assertEqual(names, ["demo-skill", "demo-skill"])
-
-    def test_the_evidence_points_at_the_read(self):
-        summary = session(
-            call("read", arguments={"path": "/tmp/skills/demo-skill/SKILL.md"}, line=12, is_error=False)
-        )
-
-        evidence = self.only(summary, detect.SKILL)[0].evidence
-
-        self.assertEqual(evidence.line, 12)
-        self.assertEqual(evidence.source, detect.SKILL)
+    def test_a_path_without_skills_is_not_a_skill(self):
+        self.assertIsNone(detect.skill_of("/repo/docs/SKILL.md"))
 
 
 class TestExecutableAttribution(DetectTestCase):
@@ -997,36 +990,34 @@ class TestAttributionGuards(unittest.TestCase):
 class TestDanglingCallsProduceNoEvidence(DetectTestCase):
     """AC-041: a toolCall with no result is counted, never turned into evidence."""
 
-    def test_a_dangling_skill_read_is_not_a_skill_invocation(self):
+    def corrected_skill_edit(self, *, completed: bool):
+        answer = support.tool_call_record("c0", "read", {"path": "/tmp/notes.md"}, record_id="a0")
+        answer["message"]["content"].insert(0, {"type": "text", "text": "Reading the notes."})
+        records = [
+            support.session_record("x"),
+            answer,
+            support.tool_result_record("c0", "read", "notes", record_id="t0"),
+            support.user_record("不對，我是說要用 X", record_id="u1"),
+            support.tool_call_record("c1", "edit", {"path": "/tmp/skills/demo/SKILL.md"}, record_id="a1"),
+        ]
+        if completed:
+            records.append(support.tool_result_record("c1", "edit", "Successfully replaced", record_id="t1"))
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "t.jsonl"
-            support.write_jsonl(
-                path,
-                [
-                    support.session_record("x"),
-                    support.tool_call_record("c1", "read", {"path": "/tmp/skills/demo/SKILL.md"}),
-                ],
-            )
+            path = support.write_jsonl(Path(tmp) / "t.jsonl", records)
             summary = parse.parse_transcript(path)
 
         signals = detect.detect_session(summary, redactor=Redactor())
+        corrections = [s for s in signals if s.kind == detect.CORRECTION]
+        self.assertEqual(len(corrections), 1)
+        return summary, corrections[0].detail["skills_edited"]
+
+    def test_a_dangling_skill_edit_names_no_skill(self):
+        summary, edited = self.corrected_skill_edit(completed=False)
 
         self.assertEqual(summary.counts.dangling_tool_calls, 1)
-        self.assertEqual([s for s in signals if s.kind == detect.SKILL], [])
+        self.assertEqual(edited, ())
 
-    def test_a_completed_skill_read_still_counts(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "t.jsonl"
-            support.write_jsonl(
-                path,
-                [
-                    support.session_record("x"),
-                    support.tool_call_record("c1", "read", {"path": "/tmp/skills/demo/SKILL.md"}),
-                    support.tool_result_record("c1", "read", "# Demo skill"),
-                ],
-            )
-            summary = parse.parse_transcript(path)
+    def test_a_completed_skill_edit_still_counts(self):
+        _, edited = self.corrected_skill_edit(completed=True)
 
-        signals = detect.detect_session(summary, redactor=Redactor())
-
-        self.assertEqual([s.subject for s in signals if s.kind == detect.SKILL], ["demo"])
+        self.assertEqual(edited, ("demo",))

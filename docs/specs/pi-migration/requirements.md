@@ -31,7 +31,7 @@ WHEN a scan runs, the system SHALL discover pi session transcripts under `~/.pi/
 
 ### REQ-003: Normalized event model
 
-The system SHALL reduce each transcript to tool calls, failures, hangs, silent-empty results, skill invocations, and user corrections；parser MUST 認得 pi 的四種 message role（`user`、`assistant`、`toolResult`、`bashExecution`）與其餘 record types，未支援的 record type MUST 被計數而非靜默丟棄。Transcript 以檔案行序解析，MUST NOT 走 `parentId` 樹（見 ADR-0004）。Evidence 以 `path:line` reference 加短 excerpt 儲存，MUST NOT 儲存整份 transcript。
+The system SHALL reduce each transcript to tool calls, failures, hangs, silent-empty results, and user corrections；parser MUST 認得 pi 的四種 message role（`user`、`assistant`、`toolResult`、`bashExecution`）與其餘 record types，未支援的 record type MUST 被計數而非靜默丟棄。Transcript 以檔案行序解析，MUST NOT 走 `parentId` 樹（見 ADR-0004）。Evidence 以 `path:line` reference 加短 excerpt 儲存，MUST NOT 儲存整份 transcript。
 
 - AC-004: GIVEN 任一 staged proposal THEN 每筆 evidence 含 source、path、line、excerpt，且 excerpt 不超過設定上限（預設 360 字元）
 - AC-040: GIVEN 一筆 `bashExecution` record WHEN 解析 THEN `command`、`exitCode`、`cancelled` 進入事件模型，且該筆 MUST NOT 進入 correction 偵測
@@ -76,12 +76,12 @@ WHEN a data-intending call returns a structurally empty result（`[]`、`{}`、`
 - AC-013: GIVEN `foo list --json` 回傳 `[]` 且 agent 後續步驟與最終回覆皆未提及空結果 WHEN 偵測 THEN 產生 silent-empty evidence
 - AC-014: GIVEN `grep` 或 `rg` 無匹配結果 WHEN 偵測 THEN 不產生 silent-empty evidence
 
-### REQ-009: Skill invocation detection
+### REQ-009: Skill attribution
 
-WHEN a read tool call targets a path ending in `SKILL.md`, the system SHALL record a skill invocation，名稱取自 skill 目錄名。此為規格預設偵測路徑；config MAY 透過 `skill_loaded_custom_types` 額外採計 pi extension 寫入的 skill-load custom entries（見 ADR-0007）。
+WHEN the agent answers a correction by changing files under a skill directory, the system SHALL record that skill on the correction evidence。判定範圍為該 correction 之後、下一則 user message 之前，成功的 `edit`/`write` tool call；skill 名稱取 path 中最後一個 `skills` 之後的目錄名（`.../skills/<name>/<file>`）。只讀取、載入過 skill 不構成歸因（見 ADR-0008）。
 
-- AC-015: GIVEN read `~/.pi/agent/skills/commit/SKILL.md` WHEN 解析 THEN 產生名為 `commit` 的 skill invocation
-- AC-044: GIVEN config 未設定 `skill_loaded_custom_types` 且 transcript 含 skill-load custom entry WHEN 解析 THEN 僅 read-path heuristic 生效；WHEN 設定該 key 後 THEN 該 entry 亦產生 skill invocation
+- AC-015: GIVEN correction 之後 agent 成功 edit `~/.pi/agent/skills/commit/SKILL.md` WHEN 偵測 THEN 該 correction 記錄 skill `commit`
+- AC-044: GIVEN correction 之前讀過 `commit/SKILL.md`、之後沒有任何 skill 檔案被修改 WHEN 偵測 THEN 該 correction 不記錄任何 skill
 
 ### REQ-010: Bilingual correction detection
 
@@ -114,17 +114,17 @@ The system SHALL route each proposal to exactly one of `tool`、`skill_improveme
 | Route | Target |
 |-------|--------|
 | `tool` | tracked executable basename，或 extension tool 的 `ext:<family>` |
-| `skill_improvement` | skill 名稱 |
+| `skill_improvement` | agent 回應 correction 時修改的 skill 名稱 |
 | `memory_context` | repository root；帶 topic 的 correction 則為 `style:<topic>`，跨 repo、跨 skill 共用 |
 | `backlog` | 正規化後的 executable 名稱 |
 
 Target 正規化：realpath 解 symlink → git toplevel → 保留原大小寫；無法判定時為 `<unknown>`（見 ADR-0005）。
 
-- AC-022: GIVEN skill invocation 且同 session 後續出現 correction WHEN routing THEN 產生 `skill_improvement` proposal
-- AC-023: GIVEN correction 未關聯任何 skill WHEN routing THEN 產生依 repository root 分組的 `memory_context` proposal，且單一 session 最多貢獻 `MAX_CORRECTIONS_PER_SESSION`（預設 3）個
+- AC-022: GIVEN correction 恰好記錄一個 skill（REQ-009）WHEN routing THEN 產生該 skill 的 `skill_improvement` proposal；記錄零個或多個 skill 時不產生
+- AC-023: GIVEN correction 未歸因於單一 skill WHEN routing THEN 產生依 repository root 分組的 `memory_context` proposal，且單一 session 最多貢獻 `MAX_CORRECTIONS_PER_SESSION`（預設 3）個
 - AC-024: GIVEN 跨 session 重複的一般工具 failure WHEN routing THEN 產生 `backlog` proposal
 - AC-046: GIVEN 同一 repo 的主目錄與其 git worktree 各自出現 correction WHEN routing THEN 兩者歸入同一個 `memory_context` target
-- AC-055: GIVEN 不同 repo、或 skill invocation 之後出現的 `verbosity` topic correction WHEN routing THEN 全部歸入 `memory_context:style:verbosity`，不依 repo 或 skill 分散
+- AC-055: GIVEN 不同 repo、或已歸因於 skill 的 `verbosity` topic correction WHEN routing THEN 全部歸入 `memory_context:style:verbosity`，不依 repo 或 skill 分散
 
 ### REQ-014: Extension-tool family grouping
 
@@ -166,7 +166,7 @@ WHEN a scan parses transcripts but yields zero tool calls for the source, the sy
 
 ### REQ-019: Configuration
 
-The system SHALL load detector overrides from a JSON config（cue packs、scaffold markers、tracked CLIs、ignores、ext-family map、`skill_loaded_custom_types` 等）；預設值保持 generic，個人 workflow 細節——包含依賴個人 extension 的訊號來源——只存在於 config。
+The system SHALL load detector overrides from a JSON config（cue packs、scaffold markers、tracked CLIs、ignores、ext-family map 等）；預設值保持 generic，個人 workflow 細節——包含依賴個人 extension 的訊號來源——只存在於 config。
 
 - AC-034: GIVEN config 覆蓋某 detector 預設 WHEN scan THEN 覆蓋值生效且未覆蓋值維持預設
 

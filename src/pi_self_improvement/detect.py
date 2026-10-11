@@ -22,13 +22,12 @@ FAILURE = "failure"
 HANG = "hang"
 SILENT_EMPTY = "silent_empty"
 RETRY = "retry"
-SKILL = "skill"
 CORRECTION = "correction"
 
-#: DEC-006: a `read` whose path ends here loaded a skill. This is the spec
-#: default because it is pi core behaviour; the richer `context:skill_loaded`
-#: entry comes from a personal extension and is opt-in via config.
-SKILL_FILENAME = "SKILL.md"
+#: DEC-006: the tools whose `path` argument changes a file. A correction the
+#: agent answered by changing a skill's files names that skill as the fix.
+_FILE_WRITE_TOOLS = frozenset({"edit", "write"})
+_SKILLS_DIR = "skills"
 
 #: Tool names that run a shell command, so the executable rather than the tool is
 #: what evidence is about.
@@ -237,10 +236,6 @@ class DetectConfig:
     detect_silent_empty: bool = True
     silent_empty_fetch_verbs: tuple[str, ...] = DEFAULT_FETCH_VERBS
     silent_empty_ignore: tuple[str, ...] = DEFAULT_SILENT_EMPTY_IGNORE
-    #: Empty by default (DEC-006/AC-044): these entries come from personal
-    #: extensions, and a public default keyed on one would silently find nothing
-    #: on anyone else's machine.
-    skill_loaded_custom_types: tuple[str, ...] = ()
     cue_packs: tuple[cues.CuePack, ...] = cues.BUILTIN_PACKS
     extra_scaffold_markers: tuple[str, ...] = ()
     #: REQ-012: a subagent's failures stay out of the backlog unless asked for.
@@ -542,51 +537,36 @@ def detect_session(
             troubled.add(id(call))
 
     signals.extend(_detect_retries(summary, redactor, config, troubled))
-    signals.extend(_detect_skills(summary, redactor, config))
     signals.extend(_detect_corrections(summary, redactor, config))
     return signals
 
 
-def _detect_skills(
-    summary: SessionSummary, redactor: Redactor, config: DetectConfig
-) -> list[Signal]:
-    """REQ-009: a skill's instructions were loaded into this session."""
-    signals: list[Signal] = []
+def skill_of(path: str) -> str | None:
+    """The skill a file belongs to: `.../skills/<name>/<file>` names `<name>`.
+
+    The last `skills` segment wins, so a checkout that itself lives under a
+    directory called `skills` still resolves to the skill, not the checkout.
+    """
+    parts = [part for part in path.replace("\\", "/").split("/") if part]
+    for index in range(len(parts) - 3, -1, -1):
+        if parts[index] == _SKILLS_DIR:
+            return parts[index + 1]
+    return None
+
+
+def _skills_edited(summary: SessionSummary, after: int, before: int | None) -> tuple[str, ...]:
+    """DEC-006: skills whose files the agent changed between two user messages."""
+    edited: set[str] = set()
     for call in summary.tool_calls:
-        if call.tool_name != "read" or call.is_error is True:
-            # A read that failed loaded nothing.
+        if call.line <= after or (before is not None and call.line >= before):
             continue
-        if not call.matched:
-            # A dangling call never returned, so nothing was loaded and AC-041
-            # says it produces no evidence. It is already in the counts.
+        if call.tool_name not in _FILE_WRITE_TOOLS or not call.matched or call.is_error is True:
             continue
         path = call.arguments.get("path")
-        if not isinstance(path, str) or not path.endswith(SKILL_FILENAME):
-            continue
-        name = _skill_name_from(path)
+        name = skill_of(path) if isinstance(path, str) else None
         if name:
-            signals.append(_context_signal(SKILL, name, summary, call.line, path, redactor))
-
-    wanted = set(config.skill_loaded_custom_types)
-    for entry in summary.custom_entries:
-        if entry.custom_type not in wanted:
-            continue
-        name = entry.data.get("name") or _skill_name_from(str(entry.data.get("path") or ""))
-        if name:
-            signals.append(
-                _context_signal(
-                    SKILL, str(name), summary, entry.line, str(entry.data.get("path") or name), redactor
-                )
-            )
-    return signals
-
-
-def _skill_name_from(path: str) -> str | None:
-    """`.../skills/commit/SKILL.md` names the skill `commit`."""
-    parts = [part for part in path.replace("\\", "/").split("/") if part]
-    if len(parts) < 2:
-        return None
-    return parts[-2]
+            edited.add(name)
+    return tuple(sorted(edited))
 
 
 def is_scaffold(text: str, config: DetectConfig | None = None) -> bool:
@@ -621,6 +601,7 @@ def _detect_corrections(
     if not summary.assistant_turns or not config.cue_packs or summary.is_subagent:
         return []
     first_answer = min(turn.line for turn in summary.assistant_turns)
+    user_lines = sorted(message.line for message in summary.user_messages)
 
     signals: list[Signal] = []
     for message in summary.user_messages:
@@ -629,6 +610,7 @@ def _detect_corrections(
         hit = cues.find_cue(message.text, config.cue_packs)
         if hit is None:
             continue
+        next_user = next((line for line in user_lines if line > message.line), None)
         signals.append(
             Signal(
                 kind=CORRECTION,
@@ -648,28 +630,11 @@ def _detect_corrections(
                     "strength": hit.strength,
                     "topic": hit.topic,
                     "cwd": summary.cwd,
+                    "skills_edited": _skills_edited(summary, message.line, next_user),
                 },
             )
         )
     return signals
-
-
-def _context_signal(
-    kind: str, subject: str, summary: SessionSummary, line: int, excerpt: str, redactor: Redactor
-) -> Signal:
-    return Signal(
-        kind=kind,
-        subject=subject,
-        evidence=Evidence(
-            source=kind,
-            path=redactor.path(summary.path),
-            line=line,
-            excerpt=redactor.path(excerpt),
-            session_id=redactor.text(summary.session_id or "") or None,
-            origin=summary.origin,
-        ),
-        detail={"name": subject},
-    )
 
 
 def _detect_call(

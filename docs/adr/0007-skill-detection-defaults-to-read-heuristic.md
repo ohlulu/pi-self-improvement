@@ -1,5 +1,7 @@
 # Skill detection defaults to the SKILL.md read heuristic
 
+Superseded by [ADR-0008](0008-skill-attribution-follows-the-agents-edit.md): skill loads are no longer detected, so the choice recorded here no longer applies.
+
 A skill invocation is detected by default from a `read` tool call whose path ends in
 `SKILL.md`, taking the skill name from the parent directory.
 

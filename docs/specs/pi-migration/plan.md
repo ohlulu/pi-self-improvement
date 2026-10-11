@@ -55,13 +55,13 @@ read_when:
 **Rationale**: 作者語料實測 20764/20764 筆 toolResult 都帶 `isError`（2026-08 量測，取樣方式見 DEC-012），flag 可信；heuristics 保留是為了 pi 格式未來 drift 時不至全盲。
 **Satisfies**: REQ-005
 
-### DEC-006: Skill detection defaults to the read-path heuristic
+### DEC-006: Skill attribution follows the agent's edit, not the skill load
 
-**Choice**: `read` tool call 的 `path` 以 `SKILL.md` 結尾 → skill invocation，名稱取 path 的父目錄名。此為規格預設；pi extension 寫入的 skill-load custom entry 由 config `skill_loaded_custom_types` 選擇性加入。
-**Alternatives**: 以 `context:skill_loaded` custom entry 為預設——它直接帶 skill 名稱、精度更高（作者語料 337 筆），但那是作者個人 extension 發出的訊號、非 pi core 行為；公開工具若以它為預設，其他使用者的 skill 偵測會靜默歸零。
-**Rationale**: REQ-019 已明訂預設保持 generic、個人 workflow 細節只存在於 config，這條訊號正屬後者。
-**Satisfies**: REQ-009、REQ-019
-**Record**: [ADR-0007](../../adr/0007-skill-detection-defaults-to-read-heuristic.md)
+**Choice**: correction 之後、下一則 user message 之前，agent 以成功的 `edit`/`write` 修改了 `.../skills/<name>/` 底下的檔案 → 該 correction 記錄 `<name>`。恰好一個 skill 時 route 到 `skill_improvement:<name>`，否則 `memory_context:<repo>`。skill 載入不再偵測，config `skill_loaded_custom_types` 移除。
+**Alternatives**: (a) 原案「session 內最後載入的 skill」——2026-10 作者語料 235 筆 skill_improvement evidence 多為產品回饋或新任務，`commit` 連續 11 次 run 全是誤判；(b) 只算載入後第一則 user message——剩 73 筆，`commit` 仍有 13 筆雜訊；(c) 載入在被回覆的 turn 內且其後有 edit/write——`commit` 降到 2 筆，但 ground truth 的 target 全判錯（實際被修的是另一個 skill）；(d) 文字提到 skill 名稱——只剩 12 筆且漏掉真案例。
+**Rationale**: 載入時機只說明 skill 在場，不說明使用者在糾正誰；agent 實際去改的那個 skill 才是修正落點。代價是沒被當場修掉的隱含 skill 失誤改走 `memory_context`，仍可見，只是不掛 skill key；被歸因者也包含使用者主動要求擴充 skill 的情況。
+**Satisfies**: REQ-009、REQ-013
+**Record**: [ADR-0008](../../adr/0008-skill-attribution-follows-the-agents-edit.md)
 
 ### DEC-007: Extension-tool family grouping
 
@@ -168,7 +168,7 @@ pi-self-improvement --resolve ROUTE:TARGET --decision {fixed,wontfix,ignored}
 pi-self-improvement --resolve-from decisions.json | --list-resolutions | --unresolve T
 ```
 
-Config keys（`~/.pi-self-improvement/config.json`）：`extra_session_roots`（REQ-002 的額外 roots，附加於預設 root 之後）、`tracked_clis`、`tracked_cli_suffix`、`cue_packs`（enable/extend）、`extra_scaffold_markers`、`extra_redaction_patterns`、`ext_family_map`、`extra_backlog_ignore`、`include_subagent_failures`、`skill_loaded_custom_types`、`detect_silent_empty`、`silent_empty_fetch_verbs`、`silent_empty_ignore`。
+Config keys（`~/.pi-self-improvement/config.json`）：`extra_session_roots`（REQ-002 的額外 roots，附加於預設 root 之後）、`tracked_clis`、`tracked_cli_suffix`、`cue_packs`（enable/extend）、`extra_scaffold_markers`、`extra_redaction_patterns`、`ext_family_map`、`extra_backlog_ignore`、`include_subagent_failures`、`detect_silent_empty`、`silent_empty_fetch_verbs`、`silent_empty_ignore`。
 
 ## Change Map
 
@@ -179,7 +179,7 @@ Config keys（`~/.pi-self-improvement/config.json`）：`extra_session_roots`（
 | `src/pi_self_improvement/parse.py` | Create | Pi JSONL parser：四種 role、toolCall/toolResult pairing、timestamps、cwd、session origin、line-order traversal、record-type counts | REQ-002, REQ-003, REQ-005, REQ-012 |
 | `src/pi_self_improvement/redact.py` | Create | Single redaction boundary for all transcript-derived strings, secret-shape masking, excerpt shortening, canary scan | REQ-004 |
 | `src/pi_self_improvement/cues.py` | Create | Cue pack model, built-in `en` + `zh-Hant`, guard logic | REQ-010 |
-| `src/pi_self_improvement/detect.py` | Create | Failure/hang/retry/silent-empty/skill/correction detectors, scaffold filter | REQ-005–REQ-011 |
+| `src/pi_self_improvement/detect.py` | Create | Failure/hang/retry/silent-empty/correction detectors, skill attribution, scaffold filter | REQ-005–REQ-011 |
 | `src/pi_self_improvement/route.py` | Create | 4-route assignment, ext-family grouping, discard rules | REQ-013, REQ-014 |
 | `src/pi_self_improvement/stage.py` | Create | Run metadata, proposal JSON, review packet writer | REQ-015 |
 | `src/pi_self_improvement/state.py` | Create | Seen keys, recurrence history, resolutions registry, pipeline ordering, self-check counts | REQ-016–REQ-018 |

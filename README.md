@@ -8,7 +8,7 @@ A pi-native self-improvement loop: mine your [pi](https://github.com/badlogic/pi
 
 Most people point AI at their work. The higher-leverage loop points it at your own setup: every fix to a skill, a tool, or an instruction file pays off in every future session. This project is a ground-up, pi-native rewrite of the ideas in [agent-improvement-loop](https://github.com/cathrynlavery/agent-improvement-loop), with two deliberate differences:
 
-- **Pi-first detection.** Pi has no `Skill` tool and no `mcp__server__tool` naming — skills are detected from `SKILL.md` reads, extension tools are grouped by family from pi's flat tool names, and `toolResult.isError` drives failure detection.
+- **Pi-first detection.** Pi has no `Skill` tool and no `mcp__server__tool` naming — a correction is filed against the skill whose files the agent edited in answer to it, extension tools are grouped by family from pi's flat tool names, and `toolResult.isError` drives failure detection.
 - **Bilingual corrections.** Correction detection is built on language cue packs (English and Traditional Chinese built in), because an English-only cue set is blind to a CJK-speaking user's corrections.
 
 ## Design at a glance
@@ -118,7 +118,6 @@ Optional, at `<output-root>/config.json`. Defaults are deliberately generic: any
 | `ext_family_map` | object | Override how flat tool names group into `ext:<family>`. |
 | `extra_backlog_ignore` | list | Programs never worth a backlog entry. |
 | `include_subagent_failures` | bool | Let subagent failures reach the backlog. Default false. |
-| `skill_loaded_custom_types` | list | Custom record types that signal a skill load. |
 | `detect_silent_empty` | bool | Toggle silent-empty detection. |
 | `silent_empty_fetch_verbs` | list | Verbs that imply a call should have returned data. |
 | `silent_empty_ignore` | list | Commands whose empty result is a valid answer. |

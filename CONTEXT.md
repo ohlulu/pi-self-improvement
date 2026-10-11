@@ -36,9 +36,10 @@ A recurring obstacle in the user's own setup — a tool, skill, or instruction f
 repeatedly costs effort across sessions. A one-off failure is not friction.
 _Avoid_: issue, problem, pain point
 
-**Skill invocation**:
-An occasion where a skill's instructions were loaded into a session.
-_Avoid_: skill use, skill call, skill trigger
+**Skill attribution**:
+The skill a correction is filed against: the one whose files the agent changed in answer
+to it. Loading a skill is not attribution.
+_Avoid_: skill invocation, skill use, skill trigger
 
 **Evidence**:
 A single observed occurrence backing a proposal, pinned to where in a transcript it

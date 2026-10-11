@@ -2,7 +2,7 @@
 
 Defaults stay generic. Everything that depends on one person's extensions or
 workflow lives here and nowhere else, because a default keyed on a personal
-extension silently finds nothing on anyone else's machine (DEC-006).
+extension silently finds nothing on anyone else's machine.
 
 Validation is strict on purpose. A misspelled key that is quietly ignored looks
 exactly like a key that had no effect, and the user has no way to tell which.
@@ -31,7 +31,6 @@ _LIST_KEYS = (
     "extra_scaffold_markers",
     "extra_redaction_patterns",
     "extra_backlog_ignore",
-    "skill_loaded_custom_types",
     "silent_empty_fetch_verbs",
     "silent_empty_ignore",
 )
@@ -99,9 +98,6 @@ class Config:
             ),
             silent_empty_ignore=_strings(
                 payload, "silent_empty_ignore", defaults.silent_empty_ignore
-            ),
-            skill_loaded_custom_types=_strings(
-                payload, "skill_loaded_custom_types", defaults.skill_loaded_custom_types
             ),
             cue_packs=cues.build_packs(payload.get("cue_packs")),
             extra_scaffold_markers=_strings(

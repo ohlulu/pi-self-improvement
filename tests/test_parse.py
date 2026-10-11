@@ -227,12 +227,9 @@ class TestRoleMapping(FixtureParseTestCase):
         self.assertNotIn("Listing project docs", joined)
         self.assertEqual(summary.counts.skipped_records.get("custom_message"), 1)
 
-    def test_custom_entries_are_kept_for_opt_in_detectors(self):
-        """AC-044: available, but not wired into detection by default."""
+    def test_custom_records_are_counted_not_dropped(self):
+        """REQ-003: an extension record never reaches a detector, but is counted."""
         summary = parse.parse_transcript(self.clean)
-        entries = [entry for entry in summary.custom_entries if entry.custom_type == "context:skill_loaded"]
-        self.assertEqual(len(entries), 1)
-        self.assertEqual(entries[0].data["name"], "demo-skill")
         self.assertEqual(summary.counts.skipped_records.get("custom"), 1)
 
 

@@ -153,6 +153,14 @@ class TestValidation(ConfigTestCase):
 
         self.assertIn("tracked_cli", str(caught.exception))
 
+    def test_the_removed_skill_load_key_is_refused(self):
+        """DEC-006: skill loads no longer route anything, so the key has no effect
+        to configure; refusing it beats silently ignoring it."""
+        with self.assertRaises(ConfigError) as caught:
+            Config.from_dict({"skill_loaded_custom_types": ["context:skill_loaded"]})
+
+        self.assertIn("skill_loaded_custom_types", str(caught.exception))
+
     def test_a_near_miss_key_gets_a_suggestion(self):
         """A silently ignored typo looks identical to a setting that had no
         effect, and the user cannot tell which."""

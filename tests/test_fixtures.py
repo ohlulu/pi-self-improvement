@@ -117,11 +117,7 @@ class TestFixtureCoverage(unittest.TestCase):
         ]
         self.assertIn("[]", texts)
 
-    def test_skill_md_read_exists(self):
-        paths = [call["arguments"].get("path", "") for call in self.tool_calls() if call["name"] == "read"]
-        self.assertTrue(any(path.endswith("SKILL.md") for path in paths))
-
-    def test_skill_loaded_custom_entry_exists(self):
+    def test_custom_record_exists(self):
         types = {
             record.get("customType")
             for recs in self.all_records.values()
