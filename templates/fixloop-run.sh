@@ -11,7 +11,7 @@
 # only thing that tells them apart.
 #
 # Environment overrides (all optional, and what the tests drive):
-#   PI_BIN            pi executable, default `pi`
+#   PI_BIN            pi executable, default `pi` resolved on PATH
 #   PSI_BIN           miner executable, default `pi-self-improvement`
 #   PSI_OUTPUT_ROOT   output root, default ~/.pi-self-improvement
 #   FIXLOOP_LOG_DIR   liveness log directory, default ~/Library/Logs
@@ -64,6 +64,14 @@ PACKET_NAME="$(basename "$LATEST_PACKET")"
 if [ -f "$MARKER" ] && [ "$(cat "$MARKER" 2>/dev/null)" = "$PACKET_NAME" ]; then
   STATUS="skipped"
   DETAIL="reason=already-triaged packet=$PACKET_NAME"
+  exit 0
+fi
+
+# launchd runs with only the plist's PATH, and pi's stderr is discarded below,
+# so a missing pi would otherwise surface as nothing more than pi_exit=127.
+if ! command -v "$PI_BIN" >/dev/null 2>&1; then
+  STATUS="error"
+  DETAIL="reason=pi-not-found pi_bin=$PI_BIN packet=$PACKET_NAME"
   exit 0
 fi
 

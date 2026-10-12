@@ -153,6 +153,8 @@ launchctl load ~/Library/LaunchAgents/com.pi-self-improvement.miner.plist
 launchctl load ~/Library/LaunchAgents/com.pi-self-improvement.fixloop.plist
 ```
 
+**launchd does not read your shell profile.** Each job runs with only the `PATH` in its plist, so `pi-self-improvement` must resolve there for both jobs, and `pi` for the fixloop. The fixloop example already includes `~/.pi/agent/bin`, where the pi installer puts `pi`. If yours lives elsewhere (`command -v pi`), add its directory to that `PATH`, or set `PI_BIN` in `EnvironmentVariables` to the absolute path. When `pi` cannot be found, the fixloop logs `status=error reason=pi-not-found`.
+
 Both runners write one `RUN` line per fire to `~/Library/Logs/`, on every exit path including failure. That line is how you tell "ran, found nothing" apart from "never fired":
 
 ```bash

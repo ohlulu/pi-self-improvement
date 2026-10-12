@@ -27,8 +27,10 @@
              only bound on an unattended run. -->
         <key>FIXLOOP_FUSE</key>
         <string>900</string>
+        <!-- launchd does not read your shell profile, so `pi` must resolve
+             on this PATH. The pi installer puts it in ~/.pi/agent/bin. -->
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <string>/Users/CHANGEME/.pi/agent/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
     </dict>
 
     <!-- Do not fire on load. `launchctl load` runs at install and at every

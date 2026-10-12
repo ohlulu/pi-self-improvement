@@ -129,6 +129,12 @@ class TestRunnerScripts(unittest.TestCase):
                 )
                 self.assertTrue((TEMPLATES / script).is_file())
 
+    def test_the_fixloop_path_includes_the_pi_installer_directory(self):
+        """launchd ignores the shell profile; without this every fire exits 127."""
+        entries = load(FIXLOOP_PLIST)["EnvironmentVariables"]["PATH"].split(":")
+
+        self.assertIn("/Users/CHANGEME/.pi/agent/bin", entries)
+
     def test_the_miner_runner_defaults_to_the_documented_window(self):
         text = (TEMPLATES / "miner-run.sh").read_text(encoding="utf-8")
 
