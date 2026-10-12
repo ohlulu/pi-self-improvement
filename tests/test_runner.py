@@ -141,6 +141,33 @@ class TestLivenessLine(RunnerTestCase):
         self.assertIn("RUN ", self.log_text())
         self.assertIn("status=error", self.log_text())
 
+    def test_a_pi_missing_from_path_is_named_in_the_run_line(self):
+        """launchd's PATH lacking pi used to log only pi_exit=127."""
+        self.with_packet()
+        (self.bin / "pi").unlink()
+
+        self.run_runner(PI_BIN="pi", PATH=f"{self.bin}:/usr/bin:/bin")
+
+        self.assertIn("status=error reason=pi-not-found pi_bin=pi", self.log_text())
+        self.assertFalse(self.psi_argv_dump.exists())
+
+    def test_a_missing_absolute_pi_bin_is_named_in_the_run_line(self):
+        self.with_packet()
+        missing = self.tmp / "nowhere" / "pi"
+
+        self.run_runner(PI_BIN=str(missing))
+
+        self.assertIn(f"reason=pi-not-found pi_bin={missing}", self.log_text())
+
+    def test_a_missing_pi_is_retried_next_time(self):
+        """Fixing PATH must let the next fire triage the packet it skipped."""
+        self.with_packet()
+        self.run_runner(PI_BIN=str(self.tmp / "nowhere" / "pi"))
+
+        self.run_runner()
+
+        self.assertIn("status=ok", self.log_text())
+
     def test_a_failing_writer_still_writes_a_run_line(self):
         self.with_packet()
         self._install("pi-self-improvement", "#!/bin/bash\nexit 1\n")
