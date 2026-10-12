@@ -66,10 +66,29 @@ one. Vividness is not frequency.
 
 ### 3. Approve
 
-Say out loud what you are about to change and get explicit agreement before
-editing anything. This tool never edits skills, memory files, config or source
-code, and the moment you act on a proposal you are the one making that change —
-the approval gate is you.
+Get explicit agreement before editing anything. This tool never edits skills,
+memory files, config or source code, and the moment you act on a proposal you
+are the one making that change — the approval gate is you.
+
+The user decides from your message alone. They did not watch the
+investigation, so everything you read and measured is in your context, not
+theirs. Write the approval request as a brief in plain language, in this order:
+
+1. **What went wrong** — the friction as the user lived it: what the agent kept
+   doing, in what kind of session, how often. Describe the situation, not the
+   target key.
+2. **Why it happens** — the cause in one or two plain sentences, marked as
+   observed or inferred.
+3. **What I would change** — the file, the edit itself when it is short, and
+   what behaves differently afterwards.
+4. **What it costs** — risk, what it might break, and what it leaves unfixed.
+5. **The choices** — each option written as "pick this and …", including
+   recording `wontfix` and stopping for today.
+
+Give every internal term (route keys, watermark, schema fields, spec IDs) a
+plain gloss the first time it appears. The question in the ask dialog restates
+the decision in one plain sentence, because the dialog may be all the user
+reads.
 
 If the proposal is wrong, that is a normal outcome. Skip to Decide and record
 `wontfix`. An unactionable proposal you leave open resurfaces every run.
