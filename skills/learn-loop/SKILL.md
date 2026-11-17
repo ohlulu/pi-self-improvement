@@ -1,5 +1,6 @@
 ---
 name: learn-loop
+disable-model-invocation: true
 description: >-
   Use when acting on staged pi-self-improvement output — reading a review
   packet, working the fix queue, deciding what to do about a proposal, or

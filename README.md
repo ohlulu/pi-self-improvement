@@ -181,7 +181,7 @@ The preview is genuinely inert — it records no state — so running it cannot 
 
 The daily job runs `pi -p` with `--tools read,grep,find,ls` to triage the newest review packet. It has no shell and no write access, and its output is structured triage that a deterministic host-side writer turns into files. That split is the safety model: a tool allowlist can say which tools, not which paths, so a model with `write` could edit skills and source directly no matter what the prompt says.
 
-Triage lands in `queue/FIX-QUEUE.md` and one `decisions/<ID>.json` per incident. Work through the queue interactively with the [`learn-loop`](skills/learn-loop/SKILL.md) skill, which is where a human approves and applies anything.
+Triage lands in `queue/FIX-QUEUE.md` and one `decisions/<ID>.json` per incident. Work through the queue interactively with the [`learn-loop`](skills/learn-loop/SKILL.md) skill, which is where a human approves and applies anything. The skill sets `disable-model-invocation: true`, so the model never loads it on its own; start it explicitly with `/skill:learn-loop`.
 
 ## Privacy
 
